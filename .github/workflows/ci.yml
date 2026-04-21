@@ -33,11 +33,8 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Build contracts
-        run: pnpm --filter=@hr-saas/contracts build
-
-      - name: Prisma generate
-        run: pnpm --filter=@hr-saas/db generate
+      - name: Packages bouwen (contracts + db)
+        run: pnpm --filter="./packages/*" build
 
       - name: Lint
         run: pnpm lint
@@ -95,8 +92,8 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Build contracts
-        run: pnpm --filter=@hr-saas/contracts build
+      - name: Packages bouwen (contracts + db)
+        run: pnpm --filter="./packages/*" build
 
       - name: Prisma migrate
         run: pnpm --filter=@hr-saas/db migrate:deploy
@@ -119,8 +116,7 @@ jobs:
           cache: 'pnpm'
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter=@hr-saas/contracts build
-      - run: pnpm --filter=@hr-saas/db generate
+      - run: pnpm --filter="./packages/*" build
       - run: pnpm build
 
       - name: Nuxt bundle-size rapport
