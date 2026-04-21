@@ -41,4 +41,5 @@ export async function withTenant<T>(
   })
 }
 
-export * from '@prisma/client'
+export { PrismaClient } from '@prisma/client'
+export type { Prisma } from '@prisma/client'
