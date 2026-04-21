@@ -2,7 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
-import { serializerCompiler, validatorCompiler, ZodTypeProvider } from '@fastify/type-provider-zod'
+import { serializerCompiler, validatorCompiler, ZodTypeProvider } from 'fastify-type-provider-zod'
 
 import { tenantContextPlugin } from './plugins/tenant-context.js'
 import { errorHandler } from './plugins/error-handler.js'
