@@ -1,0 +1,64 @@
+name: Deploy · production
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-1
+  NODE_VERSION: '20.x'
+  PNPM_VERSION: '9.12.0'
+
+jobs:
+  deploy:
+    name: Deploy naar productie
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://app.hr-saas.example
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter=@hr-saas/contracts build
+      - run: pnpm --filter=@hr-saas/db generate
+      - run: pnpm build
+
+      - name: Pre-deploy — release-checklist bevestigen
+        run: |
+          test -f "docs/sprints/$(ls docs/sprints | tail -1)/release.md" \
+            || (echo "Geen release-rapport gevonden voor deze sprint."; exit 1)
+
+      - name: Blue/green deploy
+        run: |
+          echo "ECS blue/green via CodeDeploy. Zie docs/runbooks/deploy-prod.md."
+
+      - name: Post-deploy health check (5 min)
+        run: |
+          for i in 1 2 3 4 5; do
+            sleep 60
+            curl -fsS https://app.hr-saas.example/healthz
+          done
+
+      - name: Tag release in changelog
+        run: echo "Released ${GITHUB_REF_NAME} at $(date -u +%FT%TZ)" >> CHANGELOG.md

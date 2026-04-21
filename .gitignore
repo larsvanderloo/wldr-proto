@@ -25,3 +25,7 @@ logs
 
 # Misc
 *.local
+
+# Scaffolding-artefacten en lokale mount
+hr-saas.tar.gz
+mnt/

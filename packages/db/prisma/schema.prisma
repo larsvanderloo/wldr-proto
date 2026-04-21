@@ -1,0 +1,111 @@
+// Prisma schema — HR SaaS
+// Conventies:
+// - elke tabel: tenant_id, created_at, updated_at, deleted_at
+// - multi-tenancy via tenant_id + Postgres RLS (zie migrations/init-rls)
+// - PII (bsn, iban) kolom-level encrypted met pgcrypto — waardes zijn bytea op disk
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String   @unique
+  region      String   @default("eu-west-1")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  employees Employee[]
+
+  @@map("tenants")
+}
+
+model Employee {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  firstName        String   @map("first_name")
+  lastName         String   @map("last_name")
+  email            String
+  jobTitle         String   @map("job_title")
+  department       String?
+  managerId        String?  @map("manager_id") @db.Uuid
+  employmentType   EmploymentType  @map("employment_type")
+  employmentStatus EmploymentStatus @default(active) @map("employment_status")
+  role             EmployeeRole     @default(employee)
+  startDate        DateTime @map("start_date") @db.Date
+  endDate          DateTime? @map("end_date") @db.Date
+  phoneNumber      String?  @map("phone_number")
+
+  // PII — kolom-level encrypted (pgcrypto). Prisma leest ze als Bytes;
+  // de repository decrypteert met app-level key. Nooit direct tonen.
+  bsnEncrypted     Bytes?   @map("bsn_encrypted")
+  ibanEncrypted    Bytes?   @map("iban_encrypted")
+
+  // Adres als JSONB — niet-PII volgens GDPR-classificatie
+  address          Json?
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  manager   Employee? @relation("DirectReports", fields: [managerId], references: [id])
+  reports   Employee[] @relation("DirectReports")
+
+  @@unique([tenantId, email])
+  @@index([tenantId, lastName])
+  @@index([tenantId, department])
+  @@index([tenantId, employmentStatus])
+  @@map("employees")
+}
+
+enum EmploymentType {
+  permanent
+  fixed_term
+  freelance
+  intern
+
+  @@map("employment_type")
+}
+
+enum EmploymentStatus {
+  active
+  on_leave
+  terminated
+  pending_start
+
+  @@map("employment_status")
+}
+
+enum EmployeeRole {
+  admin
+  manager
+  employee
+
+  @@map("employee_role")
+}
+
+// Audit log — onmisbaar. Elke schrijfactie op PII-houdende entiteiten
+// produceert hier een rij in dezelfde transactie.
+model AuditEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  action     String   // bv "employee.update", "employee.reveal_bsn"
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id") @db.Uuid
+  metadata   Json?
+  occurredAt DateTime @default(now()) @map("occurred_at")
+
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, occurredAt])
+  @@map("audit_events")
+}

@@ -1,0 +1,77 @@
+{
+  "common": {
+    "save": "Opslaan",
+    "cancel": "Annuleren",
+    "delete": "Verwijderen",
+    "edit": "Bewerken",
+    "create": "Aanmaken",
+    "search": "Zoeken",
+    "loading": "Bezig met laden…",
+    "empty": "Geen resultaten",
+    "confirm": "Bevestigen",
+    "reveal": "Onthullen",
+    "required": "Verplicht veld"
+  },
+  "employees": {
+    "title": "Medewerkers",
+    "new": "Nieuwe medewerker",
+    "list": {
+      "searchPlaceholder": "Zoek op naam of e-mail",
+      "filterDepartment": "Afdeling",
+      "filterStatus": "Status"
+    },
+    "fields": {
+      "firstName": "Voornaam",
+      "lastName": "Achternaam",
+      "email": "E-mailadres",
+      "jobTitle": "Functie",
+      "department": "Afdeling",
+      "manager": "Manager",
+      "employmentType": "Dienstverbandtype",
+      "employmentStatus": "Status",
+      "role": "Rol",
+      "startDate": "Startdatum",
+      "endDate": "Einddatum",
+      "phoneNumber": "Telefoonnummer",
+      "bsn": "BSN",
+      "iban": "IBAN",
+      "address": {
+        "street": "Straat",
+        "houseNumber": "Huisnummer",
+        "postalCode": "Postcode",
+        "city": "Plaats",
+        "country": "Land"
+      }
+    },
+    "employmentType": {
+      "permanent": "Vast",
+      "fixed_term": "Bepaalde tijd",
+      "freelance": "Freelance",
+      "intern": "Stagiair"
+    },
+    "employmentStatus": {
+      "active": "Actief",
+      "on_leave": "Met verlof",
+      "terminated": "Uit dienst",
+      "pending_start": "In aanloop"
+    },
+    "role": {
+      "admin": "Admin",
+      "manager": "Manager",
+      "employee": "Medewerker"
+    },
+    "reveal": {
+      "title": "Gevoelig veld onthullen",
+      "reasonLabel": "Reden (wordt gelogd)",
+      "confirm": "Onthul"
+    },
+    "created": "Medewerker aangemaakt",
+    "updated": "Wijzigingen opgeslagen",
+    "deleted": "Medewerker verwijderd"
+  },
+  "errors": {
+    "generic": "Er ging iets mis. Probeer het opnieuw.",
+    "forbidden": "Je hebt geen rechten voor deze actie.",
+    "notFound": "Niet gevonden."
+  }
+}
