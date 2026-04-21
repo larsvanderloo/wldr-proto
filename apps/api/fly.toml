@@ -7,6 +7,7 @@ app = 'hr-saas-api-demo'
 primary_region = 'ams'
 
 [build]
+  dockerfile = "Dockerfile"
 
 [deploy]
   strategy = 'rolling'

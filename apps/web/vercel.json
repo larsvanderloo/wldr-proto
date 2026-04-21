@@ -4,7 +4,6 @@
   "buildCommand": "pnpm --filter=@hr-saas/contracts build && pnpm --filter=@hr-saas/web build",
   "outputDirectory": ".output/public",
   "installCommand": "pnpm install --frozen-lockfile",
-  "regions": ["ams1"],
   "headers": [
     {
       "source": "/(.*)",
