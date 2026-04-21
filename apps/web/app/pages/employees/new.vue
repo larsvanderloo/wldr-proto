@@ -30,7 +30,9 @@ const typeOptions = (['permanent', 'fixed_term', 'freelance', 'intern'] as const
 
 <template>
   <div class="max-w-3xl space-y-6">
-    <h1 class="text-2xl font-semibold">{{ t('employees.new') }}</h1>
+    <h1 class="text-2xl font-semibold">
+      {{ t('employees.new') }}
+    </h1>
 
     <UForm
       :schema="createEmployeeInputSchema"

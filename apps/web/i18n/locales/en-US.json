@@ -1,0 +1,77 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search",
+    "loading": "Loading…",
+    "empty": "No results",
+    "confirm": "Confirm",
+    "reveal": "Reveal",
+    "required": "Required"
+  },
+  "employees": {
+    "title": "Employees",
+    "new": "New employee",
+    "list": {
+      "searchPlaceholder": "Search by name or email",
+      "filterDepartment": "Department",
+      "filterStatus": "Status"
+    },
+    "fields": {
+      "firstName": "First name",
+      "lastName": "Last name",
+      "email": "Email",
+      "jobTitle": "Job title",
+      "department": "Department",
+      "manager": "Manager",
+      "employmentType": "Employment type",
+      "employmentStatus": "Status",
+      "role": "Role",
+      "startDate": "Start date",
+      "endDate": "End date",
+      "phoneNumber": "Phone number",
+      "bsn": "BSN",
+      "iban": "IBAN",
+      "address": {
+        "street": "Street",
+        "houseNumber": "No.",
+        "postalCode": "Postal code",
+        "city": "City",
+        "country": "Country"
+      }
+    },
+    "employmentType": {
+      "permanent": "Permanent",
+      "fixed_term": "Fixed-term",
+      "freelance": "Freelance",
+      "intern": "Intern"
+    },
+    "employmentStatus": {
+      "active": "Active",
+      "on_leave": "On leave",
+      "terminated": "Terminated",
+      "pending_start": "Pending start"
+    },
+    "role": {
+      "admin": "Admin",
+      "manager": "Manager",
+      "employee": "Employee"
+    },
+    "reveal": {
+      "title": "Reveal sensitive field",
+      "reasonLabel": "Reason (audit-logged)",
+      "confirm": "Reveal"
+    },
+    "created": "Employee created",
+    "updated": "Changes saved",
+    "deleted": "Employee deleted"
+  },
+  "errors": {
+    "generic": "Something went wrong. Try again.",
+    "forbidden": "You don't have permission.",
+    "notFound": "Not found."
+  }
+}

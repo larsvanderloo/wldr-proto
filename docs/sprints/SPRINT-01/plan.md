@@ -26,6 +26,8 @@ Een werkend medewerker-CRUD met PII-masking, audit log en tenant-isolatie — de
 | INFRA-0001 | GitHub Actions CI + lokale `ci-local.sh` + Husky pre-push | P0 | devops-qa | M | done |
 | INFRA-0002 | Prisma setup met RLS migratie + Testcontainers integration-suite | P0 | backend + devops-qa | M | done |
 | PLAT-0001 | Shared `packages/contracts/` — Zod + OpenAPI-pipeline | P0 | architect | M | done |
+| INFRA-0003 | ESLint root-config (flat config ESLint 9, TS + Vue) | P0 | devops-qa + frontend | S | ready |
+| INFRA-0004 | Lokale omgeving runbook + README update (OrbStack + Colima-fallback) | P0 | devops-qa | S | ready |
 
 ## Risico's en afhankelijkheden
 
@@ -43,3 +45,4 @@ Een werkend medewerker-CRUD met PII-masking, audit log en tenant-isolatie — de
 ## Changelog
 
 - 2026-04-21 — sprint gestart met bovenstaande scope.
+- 2026-04-21 — INFRA-0003 en INFRA-0004 toegevoegd na onboarding-blokkades: ESLint-config ontbreekt (CI-gate kapot) en Docker niet aanwezig op werkstation (ADR-0003 vastgesteld: OrbStack). Beide zijn S-stories, geen scope-impact op sprintdoel.

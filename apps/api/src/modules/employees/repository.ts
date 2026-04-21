@@ -1,5 +1,4 @@
-import { withTenant } from '@hr-saas/db'
-import type { Prisma } from '@hr-saas/db'
+import { withTenant, type Prisma } from '@hr-saas/db'
 import type {
   CreateEmployeeInput,
   EmployeeListQuery,
@@ -65,6 +64,7 @@ export async function listEmployees(tenantId: string, query: EmployeeListQuery) 
 
     const hasMore = items.length > query.limit
     const sliced = hasMore ? items.slice(0, -1) : items
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- hasMore garandeert dat sliced ten minste één item heeft
     const nextCursor = hasMore ? sliced[sliced.length - 1]!.id : null
 
     return {
@@ -175,11 +175,13 @@ export async function createEmployee(tenantId: string, userId: string, input: Cr
         userId,
         action: 'employee.create',
         entityType: 'employee',
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- INSERT ... RETURNING garandeert altijd een rij; anders gooit Prisma een DB-exception
         entityId: row!.id,
         metadata: { email: input.email },
       },
     })
 
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- zie boven
     return row!.id
   })
 }

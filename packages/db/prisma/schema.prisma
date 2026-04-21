@@ -10,8 +10,15 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Runtime-queries: bij voorkeur via pooled connection (PgBouncer / RDS Proxy).
+  url       = env("DATABASE_URL")
+  // Migrations + introspect + seeding: altijd via directe (unpooled) connection.
+  // PgBouncer transaction-mode breekt advisory locks en prepared statements die
+  // `prisma migrate` nodig heeft. Zie ADR-0005.
+  // BELANGRIJK: Prisma vereist dat DIRECT_URL gezet is als deze regel hier staat.
+  // Lokaal en CI: zet DIRECT_URL identiek aan DATABASE_URL (geen pooler in het pad).
+  directUrl = env("DIRECT_URL")
 }
 
 model Tenant {

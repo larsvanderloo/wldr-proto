@@ -1,0 +1,42 @@
+{
+  "name": "hr-saas",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20.11.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "prepare": "husky",
+    "dev": "pnpm --parallel --filter=\"./apps/*\" dev",
+    "build": "pnpm --filter=\"./packages/*\" build && pnpm --filter=\"./apps/*\" build",
+    "lint": "pnpm --recursive lint",
+    "typecheck": "pnpm --recursive typecheck",
+    "test": "pnpm --recursive test",
+    "test:integration": "pnpm --filter=@hr-saas/api test:integration",
+    "test:e2e": "pnpm --filter=@hr-saas/web test:e2e",
+    "ci:local": "bash scripts/ci-local.sh",
+    "contracts:build": "pnpm --filter=@hr-saas/contracts build",
+    "openapi:generate": "pnpm --filter=@hr-saas/contracts openapi"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.5.0",
+    "@commitlint/config-conventional": "^19.5.0",
+    "eslint": "^9.13.0",
+    "eslint-plugin-vue": "^10.8.0",
+    "husky": "^9.1.6",
+    "lint-staged": "^15.2.10",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.59.0",
+    "vue-eslint-parser": "^10.4.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,vue,js}": [
+      "eslint --fix"
+    ],
+    "*.{md,json,yml,yaml}": [
+      "prettier --write"
+    ]
+  }
+}

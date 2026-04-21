@@ -12,7 +12,15 @@ Monorepo voor een multi-tenant HR SaaS-product, gebouwd door een team van vijf C
 
 ## Snelstart
 
+**Vereisten**: Node.js >= 20.11.0, pnpm >= 9.0.0, en **OrbStack** als lokale container-runtime.
+Zie [docs/runbooks/lokale-omgeving.md](docs/runbooks/lokale-omgeving.md) voor installatie-instructies,
+troubleshooting (poort 5432 bezet, container reset) en de Colima-fallback voor non-Mac.
+
 ```bash
+# 0. OrbStack installeren (eenmalig — levert de Docker-daemon)
+brew install orbstack
+# OrbStack start automatisch; docker en docker compose werken direct.
+
 # 1. Dependencies
 pnpm install
 
@@ -22,13 +30,15 @@ pnpm prepare
 # 3. Contracts bouwen (web + api importeren hieruit)
 pnpm --filter=@hr-saas/contracts build
 
-# 4. Database starten (lokaal via docker)
+# 4. Database starten (via OrbStack/Docker)
 docker run -d --name hrsaas-pg \
+  --restart unless-stopped \
   -e POSTGRES_USER=hrsaas -e POSTGRES_PASSWORD=hrsaas -e POSTGRES_DB=hrsaas \
   -p 5432:5432 postgres:16-alpine
 
 # 5. Prisma migraties
 export DATABASE_URL=postgresql://hrsaas:hrsaas@localhost:5432/hrsaas
+export DIRECT_URL=postgresql://hrsaas:hrsaas@localhost:5432/hrsaas
 export PII_ENCRYPTION_KEY=dev-only-pii-key-change-in-prod
 pnpm --filter=@hr-saas/db migrate:dev
 

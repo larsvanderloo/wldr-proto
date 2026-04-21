@@ -1,0 +1,226 @@
+name: Deploy · demo (Fly.io + Vercel + Neon)
+
+# Trigger: elke push naar main.
+# Dit is de demo-pipeline (ADR-0004). De productie-pipeline (AWS ECS) volgt
+# in een latere sprint via deploy-prod.yml.
+#
+# Vereiste GitHub-secrets (stel in via repo Settings → Secrets and variables → Actions):
+#   NEON_DATABASE_URL   — pooled Neon URL (PgBouncer), formaat:
+#                         postgresql://user:pass@<proj>-pooler.eu-central-1.aws.neon.tech/neondb
+#                         ?sslmode=require&pgbouncer=true&connect_timeout=10
+#   NEON_DIRECT_URL     — directe Neon URL (zonder pooler), formaat:
+#                         postgresql://user:pass@<proj>.eu-central-1.aws.neon.tech/neondb
+#                         ?sslmode=require&connect_timeout=10
+#   PII_ENCRYPTION_KEY  — 32-byte hex string. Gebruik NOOIT de dev-key hier.
+#                         Genereer: openssl rand -hex 32
+#   FLY_API_TOKEN       — deploy-token. Genereer: fly tokens create deploy -a hr-saas-api-demo
+#   VERCEL_TOKEN        — personal access token uit vercel.com/account/tokens
+#   VERCEL_ORG_ID       — te vinden in vercel.com team-settings of .vercel/project.json
+#   VERCEL_PROJECT_ID   — te vinden in .vercel/project.json na `vercel link`
+#
+# Zie docs/runbooks/demo-deploy.md voor eenmalige setup en troubleshooting.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-demo
+  # Niet annuleren bij overlap — een lopende migrate mag niet halverwege stoppen.
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '20.x'
+  PNPM_VERSION: '9.12.0'
+
+jobs:
+  # ─── Job 1: migrate ───────────────────────────────────────────────────────
+  # Draait Prisma migrate deploy via de directe URL (zonder PgBouncer).
+  # PgBouncer transaction-mode breekt advisory locks die Prisma migrate gebruikt.
+  # Zie ADR-0005 voor de redenering achter dual-URL.
+  migrate:
+    name: DB migraties (Neon direct)
+    runs-on: ubuntu-latest
+    environment: demo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build contracts
+        run: pnpm --filter=@hr-saas/contracts build
+
+      - name: Prisma generate
+        env:
+          DATABASE_URL: ${{ secrets.NEON_DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.NEON_DIRECT_URL }}
+        run: pnpm --filter=@hr-saas/db generate
+
+      - name: Prisma migrate deploy
+        # Gebruik NEON_DIRECT_URL voor beide: migrate heeft geen pooler nodig.
+        env:
+          DATABASE_URL: ${{ secrets.NEON_DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.NEON_DIRECT_URL }}
+        run: pnpm --filter=@hr-saas/db migrate:deploy
+
+  # ─── Job 2: deploy-api ────────────────────────────────────────────────────
+  # Bouwt en deployt de Fastify-container naar Fly.io (Amsterdam).
+  # --remote-only: Fly bouwt de image in de cloud, geen lokale Docker nodig.
+  deploy-api:
+    name: Deploy API naar Fly.io
+    runs-on: ubuntu-latest
+    environment: demo
+    needs: [migrate]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Fly secrets synchroniseren
+        # Zet secrets alleen als ze (nog) niet correct staan.
+        # `fly secrets set` is idempotent: ongewijzigde waarden triggeren geen deploy.
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          fly secrets set \
+            DATABASE_URL="${{ secrets.NEON_DATABASE_URL }}" \
+            DIRECT_URL="${{ secrets.NEON_DIRECT_URL }}" \
+            PII_ENCRYPTION_KEY="${{ secrets.PII_ENCRYPTION_KEY }}" \
+            CORS_ORIGIN="https://app.larsvdloo.com" \
+            --app hr-saas-api-demo \
+            --stage
+
+      - name: Deploy naar Fly.io
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy \
+            --remote-only \
+            --config apps/api/fly.toml \
+            --app hr-saas-api-demo \
+            --wait-timeout 120
+
+      - name: Health check API
+        run: |
+          echo "Wachten op Fly health check..."
+          sleep 15
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" https://hr-saas-api-demo.fly.dev/healthz || echo "000")
+          if [ "$STATUS" != "200" ]; then
+            echo "Health check mislukt — HTTP $STATUS"
+            exit 1
+          fi
+          echo "API bereikbaar — HTTP $STATUS"
+
+  # ─── Job 3: deploy-web ────────────────────────────────────────────────────
+  # Deployt de Nuxt-app naar Vercel.
+  # Parallel met deploy-api — web heeft geen directe DB-afhankelijkheid.
+  # Wacht WEL op migrate: een nieuwe web-build mag alleen live als de DB-schema
+  # up-to-date is (backward-compat migraties; zie non-negotiables in CLAUDE.md).
+  deploy-web:
+    name: Deploy web naar Vercel
+    runs-on: ubuntu-latest
+    environment: demo
+    needs: [migrate]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Vercel CLI
+        run: pnpm add -g vercel@latest
+
+      - name: Vercel pull (haal project-config op)
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          vercel pull --yes --environment=production \
+            --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Vercel build
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          # NUXT_PUBLIC_API_BASE en NITRO_PRESET worden door Vercel gezet vanuit
+          # de Vercel project environment variables (niet via CI-secrets).
+          # Zie runbook sectie "Eenmalige setup — Vercel".
+        run: |
+          vercel build --prod \
+            --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Vercel deploy (pre-built)
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          vercel deploy --prebuilt --prod \
+            --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Health check web
+        run: |
+          echo "Wachten op Vercel propagatie..."
+          sleep 10
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" https://app.larsvdloo.com || echo "000")
+          if [ "$STATUS" != "200" ]; then
+            echo "Web health check mislukt — HTTP $STATUS"
+            exit 1
+          fi
+          echo "Web bereikbaar — HTTP $STATUS"
+
+  # ─── Job 4: smoke-test ────────────────────────────────────────────────────
+  # Minimale rook-test na beide deploys: verifieer dat API en web bereikbaar zijn
+  # en dat de CORS-headers correct zijn (web mag API aanroepen).
+  smoke-test:
+    name: Smoke tests na deploy
+    runs-on: ubuntu-latest
+    needs: [deploy-api, deploy-web]
+    steps:
+      - name: API /healthz
+        run: |
+          curl -sf https://hr-saas-api-demo.fly.dev/healthz | grep -q '"status":"ok"'
+          echo "API healthz OK"
+
+      - name: API CORS op custom domein
+        run: |
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
+            -H "Origin: https://app.larsvdloo.com" \
+            https://api.larsvdloo.com/healthz || echo "000")
+          echo "API custom domein HTTP $STATUS"
+          # 200 of 204 zijn beide acceptabel afhankelijk van CORS preflight
+          [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ]
+
+      - name: Web bereikbaar
+        run: |
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" https://app.larsvdloo.com || echo "000")
+          echo "Web HTTP $STATUS"
+          [ "$STATUS" = "200" ]
+
+      - name: Deploy-log wegschrijven
+        if: always()
+        run: |
+          echo "Demo deploy: $(date -u +%FT%TZ), sha=${GITHUB_SHA::7}, status=${{ job.status }}" \
+            >> /tmp/deploy-demo.log
+          cat /tmp/deploy-demo.log

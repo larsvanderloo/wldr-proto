@@ -180,6 +180,9 @@ importers:
         specifier: ^5.22.0
         version: 5.22.0(prisma@5.22.0)
     devDependencies:
+      '@types/node':
+        specifier: ^22.8.6
+        version: 22.19.17
       prisma:
         specifier: ^5.22.0
         version: 5.22.0

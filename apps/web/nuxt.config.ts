@@ -16,8 +16,17 @@ export default defineNuxtConfig({
     typeCheck: true,
   },
 
+  // Nitro preset: 'vercel' in productie, lokaal wordt de preset genegeerd.
+  // NUXT_NITRO_PRESET=vercel wordt door Vercel automatisch gezet; lokaal
+  // draait Nitro zonder preset (node-server). Geen aparte if/else nodig.
+  nitro: {
+    preset: process.env.NITRO_PRESET ?? 'node-server',
+  },
+
   runtimeConfig: {
     public: {
+      // Overschrijf in productie via NUXT_PUBLIC_API_BASE op Vercel.
+      // Lokaal: http://localhost:4000. Demo-productie: https://api.larsvdloo.com.
       apiBase: process.env.NUXT_PUBLIC_API_BASE ?? 'http://localhost:4000',
     },
   },

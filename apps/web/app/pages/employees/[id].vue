@@ -13,14 +13,20 @@ const { t } = useI18n()
 const route = useRoute()
 const id = computed(() => route.params.id as string)
 
-const { data: employee, state } = useEmployee(id)
+const { data: employee, status } = useEmployee(id)
 const update = useUpdateEmployee()
 const remove = useDeleteEmployee()
+
+// Null-vrij UI-form-type: UInput/USelectMenu v-model accepteert geen null.
+// Null-waarden uit de API worden omgezet naar undefined bij het inladen.
+type EmployeeFormState = {
+  [K in keyof UpdateEmployeeInput]: NonNullable<UpdateEmployeeInput[K]> | undefined
+}
 
 // UForm werkt met een reactive state-object. We syncen 'm met de geladen
 // data via watchEffect — niet hergebruiken als server-state-cache, dat blijft
 // bij Colada.
-const form = reactive<Partial<UpdateEmployeeInput>>({ id: id.value })
+const form = reactive<Partial<EmployeeFormState>>({ id: id.value })
 
 watchEffect(() => {
   if (!employee.value) return
@@ -32,7 +38,7 @@ watchEffect(() => {
     email: e.email,
     jobTitle: e.jobTitle,
     department: e.department ?? undefined,
-    managerId: e.managerId ?? undefined,
+    managerId: e.managerId || undefined,
     employmentType: e.employmentType,
     employmentStatus: e.employmentStatus,
     role: e.role,
@@ -40,7 +46,7 @@ watchEffect(() => {
     endDate: e.endDate ?? undefined,
     phoneNumber: e.phoneNumber ?? undefined,
     address: e.address ?? undefined,
-  } satisfies Partial<UpdateEmployeeInput>)
+  } satisfies Partial<EmployeeFormState>)
 })
 
 useHead(() => ({
@@ -82,7 +88,9 @@ const roleOptions = computed(() =>
 
 <template>
   <div class="space-y-6">
-    <div v-if="state === 'pending'" class="text-toned">{{ t('common.loading') }}</div>
+    <div v-if="status === 'pending'" class="text-toned">
+      {{ t('common.loading') }}
+    </div>
 
     <template v-else-if="employee">
       <div class="flex items-center justify-between">
@@ -150,7 +158,9 @@ const roleOptions = computed(() =>
         </UFormField>
 
         <div class="md:col-span-2 mt-2 border-t border-muted pt-4 space-y-3">
-          <h2 class="font-medium text-default">Gevoelige gegevens</h2>
+          <h2 class="font-medium text-default">
+            Gevoelige gegevens
+          </h2>
           <div class="grid gap-4 md:grid-cols-2">
             <MaskedField
               :employee-id="employee.id"

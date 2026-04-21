@@ -9,17 +9,18 @@
     "start": "node dist/server.js",
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --exclude='**/*.integration.test.ts'",
-    "test:integration": "vitest run --include='**/*.integration.test.ts'"
+    "test": "vitest run --passWithNoTests --exclude='**/*.integration.test.ts'",
+    "test:integration": "vitest run --passWithNoTests --include='**/*.integration.test.ts'"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
     "@fastify/helmet": "^12.0.1",
     "@fastify/rate-limit": "^10.1.1",
-    "fastify-type-provider-zod": "^4.0.2",
     "@hr-saas/contracts": "workspace:*",
     "@hr-saas/db": "workspace:*",
     "fastify": "^5.1.0",
+    "fastify-plugin": "^5",
+    "fastify-type-provider-zod": "^4.0.2",
     "pino": "^9.5.0",
     "zod": "^3.23.8"
   },

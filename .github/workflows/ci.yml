@@ -73,7 +73,10 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
+      # Lokaal/CI: pooler en directe URL zijn identiek (geen PgBouncer in het pad).
+      # Beide worden gezet omdat schema.prisma `directUrl` declareert (zie ADR-0005).
       DATABASE_URL: postgresql://hrsaas:hrsaas@localhost:5432/hrsaas_test
+      DIRECT_URL: postgresql://hrsaas:hrsaas@localhost:5432/hrsaas_test
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

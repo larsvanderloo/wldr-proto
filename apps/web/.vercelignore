@@ -1,0 +1,33 @@
+# .vercelignore — apps/web
+# Vercel bouwt uitsluitend de Nuxt-app. API, DB en contracts zijn geen
+# onderdeel van de Vercel build-context; ze worden apart gedeployd op Fly.io.
+# Contracts worden WEL gebouwd (buildCommand), maar de bronmap hoeft niet
+# als artifact geupload te worden na build.
+
+# API en runtime-infra
+apps/api/
+apps/api/**
+
+# Database-package (migraties draaien via deploy-demo.yml, niet via Vercel)
+packages/db/
+packages/db/**
+
+# Terraform-infra
+infra/
+infra/**
+
+# Node modules — Vercel installeert zelf via pnpm
+**/node_modules
+
+# Test-artefacten
+**/playwright-report
+**/test-results
+**/.vitest
+**/coverage
+
+# Lokale build-output van andere packages (worden opnieuw gebouwd in Vercel)
+packages/contracts/dist
+
+# Documentatie en sprint-bestanden
+docs/
+scripts/

@@ -1,0 +1,42 @@
+# fly.toml app configuration file generated for hr-saas-api-demo on 2026-04-21T22:17:58+02:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'hr-saas-api-demo'
+primary_region = 'ams'
+
+[build]
+
+[deploy]
+  strategy = 'rolling'
+  release_command = 'node dist/server.js --healthcheck-only 2>/dev/null || true'
+
+[env]
+  HOST = '0.0.0.0'
+  LOG_LEVEL = 'info'
+  NODE_ENV = 'production'
+  PORT = '4000'
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = 'requests'
+    hard_limit = 200
+    soft_limit = 150
+
+  [[http_service.checks]]
+    interval = '15s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/healthz'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'

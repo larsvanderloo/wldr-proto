@@ -15,7 +15,7 @@ const query = ref<EmployeeListQuery>({
   sortDir: 'asc',
 })
 
-const { data, state, refresh } = useEmployees(query)
+const { data, status, refresh } = useEmployees(query)
 
 const statusOptions = computed(() => [
   { label: 'Alle', value: undefined },
@@ -40,7 +40,7 @@ const columns = computed(() => [
   { id: 'actions', header: '' },
 ])
 
-function onRowClick(row: { original: EmployeeListItem }) {
+function onRowClick(_e: Event, row: { original: EmployeeListItem }) {
   return navigateTo(`/employees/${row.original.id}`)
 }
 </script>
@@ -48,7 +48,9 @@ function onRowClick(row: { original: EmployeeListItem }) {
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <h1 class="text-2xl font-semibold">{{ t('employees.title') }}</h1>
+      <h1 class="text-2xl font-semibold">
+        {{ t('employees.title') }}
+      </h1>
       <Can action="create" subject="employee">
         <UButton
           icon="i-lucide-plus"
@@ -76,7 +78,7 @@ function onRowClick(row: { original: EmployeeListItem }) {
       <UButton
         variant="ghost"
         icon="i-lucide-refresh-cw"
-        :loading="state === 'pending'"
+        :loading="status === 'pending'"
         @click="refresh()"
       />
     </div>
@@ -84,13 +86,13 @@ function onRowClick(row: { original: EmployeeListItem }) {
     <UTable
       :data="data?.items ?? []"
       :columns="columns"
-      :loading="state === 'pending'"
+      :loading="status === 'pending'"
       :empty-state="{ icon: 'i-lucide-users', label: t('common.empty') }"
       class="rounded-lg border border-muted"
-      @select="onRowClick"
+      :on-select="onRowClick"
     />
 
-    <div class="flex items-center justify-end gap-2" v-if="data?.nextCursor">
+    <div v-if="data?.nextCursor" class="flex items-center justify-end gap-2">
       <UButton
         variant="ghost"
         :label="t('common.loading')"

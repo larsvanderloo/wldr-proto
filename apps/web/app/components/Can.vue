@@ -17,9 +17,9 @@ const allowed = computed(() => can(props.action, props.subject))
 
 <template>
   <template v-if="allowed">
-    <slot />
+    <slot></slot>
   </template>
   <template v-else>
-    <slot name="fallback" />
+    <slot name="fallback"></slot>
   </template>
 </template>
