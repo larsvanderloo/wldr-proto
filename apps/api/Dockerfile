@@ -1,6 +1,7 @@
 # Dockerfile — apps/api
 # Multi-stage build. Doelplatform: linux/amd64 (Fly.io), toekomst: AWS ECS Fargate.
-# Node 20 LTS + pnpm. De monorepo wordt gekopieerd zodat workspace-dependencies werken.
+# Gebruikt `pnpm deploy` om een self-contained productie-bundle te maken,
+# zodat de pnpm virtual-store symlinkstructuur niet in de runtime-image belandt.
 
 # ─── Stage 1: deps ──────────────────────────────────────────────────────────
 FROM node:20-alpine AS deps
@@ -48,9 +49,16 @@ RUN pnpm --filter=@hr-saas/db build
 # Compileer TypeScript → dist/.
 RUN pnpm --filter=@hr-saas/api build
 
+# Bundel de api + productie-deps + workspace-deps in één self-contained directory.
+# pnpm deploy lost de volledige virtuele-store structuur op en schrijft echte
+# node_modules (zonder symlinks naar de centrale store) naar /tmp/api-deploy.
+RUN pnpm --filter=@hr-saas/api deploy --prod /tmp/api-deploy
+
+# Kopieer Prisma-schema in de deploy-dir zodat migrate deploy werkt bij runtime.
+RUN cp -r packages/db/prisma /tmp/api-deploy/prisma
+
 # ─── Stage 3: runtime ───────────────────────────────────────────────────────
-# Kopieer alles vanuit builder — geen tweede install nodig.
-# Prisma-binaries zijn al voor linux/musl (alpine) gegenereerd in builder-stage.
+# Geen tweede pnpm install nodig — /tmp/api-deploy is volledig self-contained.
 FROM node:20-alpine AS runtime
 WORKDIR /app
 
@@ -62,23 +70,12 @@ ENV HOST=0.0.0.0
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 --ingroup nodejs apiuser
 
-# Kopieer workspace-manifests (nodig voor pnpm module-resolution).
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/pnpm-workspace.yaml ./
-COPY --from=builder /app/apps/api/package.json ./apps/api/
-COPY --from=builder /app/packages/contracts/package.json ./packages/contracts/
-COPY --from=builder /app/packages/db/package.json ./packages/db/
-
-# Kopieer node_modules vanuit builder (pnpm virtual store).
-COPY --from=builder /app/node_modules ./node_modules
-
-# Kopieer gebouwde artefacten.
-COPY --from=builder /app/apps/api/dist ./apps/api/dist
-COPY --from=builder /app/packages/contracts/dist ./packages/contracts/dist
-COPY --from=builder /app/packages/db/dist ./packages/db/dist
-
-# Kopieer Prisma-schema (nodig voor runtime migraties via prisma migrate deploy).
-COPY --from=builder /app/packages/db/prisma ./packages/db/prisma
+# Kopieer de self-contained bundle vanuit de builder.
+# dist/ bevat al packages/db/dist en packages/contracts/dist via pnpm deploy.
+COPY --from=builder /tmp/api-deploy/dist         ./dist
+COPY --from=builder /tmp/api-deploy/node_modules ./node_modules
+COPY --from=builder /tmp/api-deploy/package.json ./package.json
+COPY --from=builder /tmp/api-deploy/prisma       ./prisma
 
 # Eigendom overzetten aan non-root user.
 RUN chown -R apiuser:nodejs /app
@@ -91,4 +88,5 @@ EXPOSE 4000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:4000/healthz || exit 1
 
-CMD ["node", "apps/api/dist/server.js"]
+# server.js staat direct in dist/ na pnpm deploy (niet meer apps/api/dist/).
+CMD ["node", "dist/server.js"]

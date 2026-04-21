@@ -1,0 +1,40 @@
+# .dockerignore — root van de monorepo
+# Voorkomt dat grote of gevoelige directories de Docker build-context insturen.
+# Kleinere context = snellere upload naar daemon + betere cache-validatie.
+
+# Lokale dependency-stores — worden in de container opnieuw geïnstalleerd
+node_modules
+.pnpm-store
+
+# Build-artefacten — worden in de container opnieuw gebouwd
+**/dist
+**/.nuxt
+**/.output
+
+# Lokale omgevingsbestanden — NOOIT in image
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Git en editor-metadata
+.git
+.gitignore
+.editorconfig
+
+# Test- en CI-artefacten
+**/coverage
+**/.vitest-cache
+**/__snapshots__
+**/playwright-report
+**/test-results
+
+# Documentatie
+docs
+*.md
+
+# Infra (Terraform state heeft gevoelige data)
+infra
+
+# OS-junk
+.DS_Store
+Thumbs.db
