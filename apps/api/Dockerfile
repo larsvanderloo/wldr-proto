@@ -39,11 +39,11 @@ COPY apps/api/ ./apps/api/
 # Bouw contracts eerst (api importeert hieruit).
 RUN pnpm --filter=@hr-saas/contracts build
 
-# Genereer Prisma-client (nodig voor TypeScript-types tijdens api-build).
+# Genereer Prisma-client + compileer packages/db naar dist/.
 # DATABASE_URL hoeft hier niet beschikbaar te zijn — generate doet geen DB-verbinding.
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 ENV DIRECT_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
-RUN pnpm --filter=@hr-saas/db generate
+RUN pnpm --filter=@hr-saas/db build
 
 # Compileer TypeScript → dist/.
 RUN pnpm --filter=@hr-saas/api build
@@ -75,6 +75,7 @@ COPY --from=builder /app/node_modules ./node_modules
 # Kopieer gebouwde artefacten.
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/packages/contracts/dist ./packages/contracts/dist
+COPY --from=builder /app/packages/db/dist ./packages/db/dist
 
 # Kopieer Prisma-schema (nodig voor runtime migraties via prisma migrate deploy).
 COPY --from=builder /app/packages/db/prisma ./packages/db/prisma
