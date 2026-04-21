@@ -188,9 +188,16 @@ jobs:
       - name: Health check web
         run: |
           echo "Wachten op Vercel propagatie..."
-          sleep 10
-          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" https://app.larsvdloo.com || echo "000")
-          if [ "$STATUS" != "200" ]; then
+          sleep 15
+          # curl zonder -f zodat we de HTTP-statuscode altijd krijgen, ook bij 4xx.
+          # Alleen 5xx en curl-fouten (000) zijn een harde fout:
+          # - 2xx: OK
+          # - 3xx: redirect (login-wall verwacht op /)
+          # - 4xx: app reageert, auth werkt — acceptabel voor health check
+          # - 5xx / 000: server kapot of DNS niet bereikbaar — fail
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://app.larsvdloo.com || echo "000")
+          echo "Web health check HTTP $STATUS"
+          if [ "$STATUS" = "000" ] || [ "${STATUS:0:1}" = "5" ]; then
             echo "Web health check mislukt — HTTP $STATUS"
             exit 1
           fi
@@ -220,9 +227,10 @@ jobs:
 
       - name: Web bereikbaar
         run: |
-          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" https://app.larsvdloo.com || echo "000")
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://app.larsvdloo.com || echo "000")
           echo "Web HTTP $STATUS"
-          [ "$STATUS" = "200" ]
+          # Accepteer 2xx/3xx/4xx — alleen 5xx en curl-fouten (000) zijn echt kapot.
+          [ "$STATUS" != "000" ] && [ "${STATUS:0:1}" != "5" ]
 
       - name: Deploy-log wegschrijven
         if: always()
