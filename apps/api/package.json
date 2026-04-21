@@ -10,7 +10,7 @@
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests --exclude='**/*.integration.test.ts'",
-    "test:integration": "vitest run --passWithNoTests --include='**/*.integration.test.ts'"
+    "test:integration": "vitest run --passWithNoTests 'src/**/*.integration.test.ts'"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

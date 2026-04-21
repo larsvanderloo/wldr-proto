@@ -10,6 +10,10 @@ WORKDIR /app
 ENV PNPM_VERSION=9.12.0
 RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
+# Build-tools voor native modules (cpu-features via ssh2 → testcontainers devDep).
+# Verwijderd na install om image-groei te beperken.
+RUN apk add --no-cache --virtual .build-deps python3 make g++ linux-headers
+
 # Kopieer workspace-manifests voor optimale cache-laag.
 # Wijzigingen in broncode invalideren deze laag niet.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
@@ -17,9 +21,11 @@ COPY apps/api/package.json ./apps/api/
 COPY packages/contracts/package.json ./packages/contracts/
 COPY packages/db/package.json ./packages/db/
 
-# Installeer alleen productie-dependencies + devDependencies nodig voor build.
+# Installeer alle dependencies (incl. devDeps voor build).
+# HUSKY=0: voorkomt dat prepare-script faalt (husky niet aanwezig in container).
 # --frozen-lockfile: expliciete lock-controle, nooit stil upgraden.
-RUN pnpm install --frozen-lockfile
+ENV HUSKY=0
+RUN pnpm install --frozen-lockfile && apk del .build-deps
 
 # ─── Stage 2: build ─────────────────────────────────────────────────────────
 FROM deps AS builder
@@ -43,6 +49,8 @@ RUN pnpm --filter=@hr-saas/db generate
 RUN pnpm --filter=@hr-saas/api build
 
 # ─── Stage 3: runtime ───────────────────────────────────────────────────────
+# Kopieer alles vanuit builder — geen tweede install nodig.
+# Prisma-binaries zijn al voor linux/musl (alpine) gegenereerd in builder-stage.
 FROM node:20-alpine AS runtime
 WORKDIR /app
 
@@ -50,35 +58,26 @@ ENV NODE_ENV=production
 ENV PORT=4000
 ENV HOST=0.0.0.0
 
-# pnpm nodig voor `node_modules/.pnpm` symlinks — lightweight.
-ENV PNPM_VERSION=9.12.0
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
-
 # Non-root user voor minimale aanvalsvlakte.
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 --ingroup nodejs apiuser
 
-# Kopieer workspace-manifests en lock voor productie-install.
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY apps/api/package.json ./apps/api/
-COPY packages/contracts/package.json ./packages/contracts/
-COPY packages/db/package.json ./packages/db/
+# Kopieer workspace-manifests (nodig voor pnpm module-resolution).
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/pnpm-workspace.yaml ./
+COPY --from=builder /app/apps/api/package.json ./apps/api/
+COPY --from=builder /app/packages/contracts/package.json ./packages/contracts/
+COPY --from=builder /app/packages/db/package.json ./packages/db/
 
-# Alleen productie-dependencies installeren.
-RUN pnpm install --frozen-lockfile --prod
+# Kopieer node_modules vanuit builder (pnpm virtual store).
+COPY --from=builder /app/node_modules ./node_modules
 
-# Kopieer gebouwde artefacten vanuit builder.
+# Kopieer gebouwde artefacten.
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/packages/contracts/dist ./packages/contracts/dist
 
-# Kopieer Prisma-schema en gegenereerde client.
-COPY packages/db/prisma ./packages/db/prisma
-COPY --from=builder /app/node_modules/.pnpm ./node_modules/.pnpm
-
-# Hergenereer Prisma-client in runtime-image (linkt correcte binaries voor alpine).
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
-RUN cd packages/db && npx prisma generate
+# Kopieer Prisma-schema (nodig voor runtime migraties via prisma migrate deploy).
+COPY --from=builder /app/packages/db/prisma ./packages/db/prisma
 
 # Eigendom overzetten aan non-root user.
 RUN chown -R apiuser:nodejs /app
