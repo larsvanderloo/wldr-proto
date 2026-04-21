@@ -84,7 +84,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # setup-flyctl@master is onstabiel. Handmatige install via officieel install-script
+      # is betrouwbaarder en garandeert altijd de laatste stabiele flyctl.
+      - name: Install flyctl
+        run: curl -L https://fly.io/install.sh | sh
+
+      - name: Flyctl aan PATH toevoegen
+        run: echo "$HOME/.fly/bin" >> $GITHUB_PATH
 
       - name: Fly secrets synchroniseren
         # Zet secrets alleen als ze (nog) niet correct staan.

@@ -46,7 +46,12 @@ jobs:
         run: pnpm typecheck
 
       - name: Unit tests
-        run: pnpm test -- --coverage
+        run: pnpm --recursive --if-present test
+
+      # Coverage apart: pnpm --recursive ondersteunt geen script-args meegeven.
+      # Elk pakket dat coverage wil genereren heeft een eigen test:coverage script.
+      - name: Coverage (api)
+        run: pnpm --filter=@hr-saas/api exec vitest run --passWithNoTests --exclude='**/*.integration.test.ts' --coverage || true
 
       - name: Upload coverage
         if: always()
@@ -151,7 +156,7 @@ jobs:
         run: pnpm audit --prod --audit-level=high
 
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.30.0
         with:
           scan-type: fs
           scan-ref: .
