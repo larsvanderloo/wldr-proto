@@ -22,6 +22,7 @@
     "@fastify/rate-limit": "^10.1.1",
     "@hr-saas/contracts": "workspace:*",
     "@hr-saas/db": "workspace:*",
+    "@prisma/client": "^5.22.0",
     "bcryptjs": "^3.0.3",
     "fastify": "^5.1.0",
     "fastify-plugin": "^5",

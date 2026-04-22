@@ -51,6 +51,18 @@ RUN pnpm --filter=@hr-saas/api build
 # --prod garandeert dat testcontainers/supertest/cpu-features worden uitgesloten.
 RUN pnpm --filter=@hr-saas/api deploy --prod /tmp/api-deploy
 
+# KRITIEKE FIX: @prisma/client postinstall (uitgevoerd door pnpm deploy) overschrijft
+# de daadwerkelijk gegenereerde .prisma/client/ bestanden met placeholder-stubs,
+# omdat de prisma CLI niet beschikbaar is in de prod-bundle (devDependency van @hr-saas/db).
+# De echte gegenereerde client + query-engine-binaries zitten in de builder na
+# `pnpm --filter=@hr-saas/db build`. We kopiëren de volledige directory terug
+# naar de deploy-output (overschrijft stubs en voegt query-engine binaries toe).
+RUN PRISMA_PKG="@prisma+client@5.22.0_prisma@5.22.0" && \
+    BUILDER_DIR="/app/node_modules/.pnpm/${PRISMA_PKG}/node_modules/.prisma/client" && \
+    DEPLOY_DIR="/tmp/api-deploy/node_modules/.pnpm/${PRISMA_PKG}/node_modules/.prisma/client" && \
+    cp -rf "${BUILDER_DIR}/." "${DEPLOY_DIR}/" && \
+    echo "Prisma gegenereerde client + engine-binaries teruggezet vanuit builder."
+
 # Kopieer Prisma-schema in de deploy-dir zodat migrate deploy werkt bij runtime.
 RUN cp -r packages/db/prisma /tmp/api-deploy/prisma
 

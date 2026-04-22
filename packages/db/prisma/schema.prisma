@@ -7,6 +7,9 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["multiSchema"]
+  // Native: voor lokale dev en CI. linux-musl targets: voor Docker/Fly.io (Alpine).
+  // Zowel amd64 (Fly.io, AWS ECS) als arm64 (Apple Silicon builds) gedekt.
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x", "linux-musl-arm64-openssl-3.0.x"]
 }
 
 datasource db {
