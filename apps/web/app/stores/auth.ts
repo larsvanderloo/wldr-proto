@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { jwtDecode } from 'jwt-decode'
-import type { JwtClaims, LoginRequest, User } from '@hr-saas/contracts/auth'
+import type { JwtClaims, LoginRequest, User } from '@hr-saas/contracts'
 
 /**
  * Auth-store (Pinia, NIET gepersisteerd).

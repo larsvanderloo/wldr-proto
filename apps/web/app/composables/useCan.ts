@@ -1,4 +1,4 @@
-import type { Role } from '@hr-saas/contracts/auth'
+import type { Role } from '@hr-saas/contracts'
 
 /**
  * useCan — lichtgewicht RBAC-helper.

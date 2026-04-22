@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { FormSubmitEvent } from '@nuxt/ui'
-import { loginRequestSchema, type LoginRequest, type AuthErrorCode } from '@hr-saas/contracts/auth'
+import { loginRequestSchema, type LoginRequest, type AuthErrorCode } from '@hr-saas/contracts'
 
 definePageMeta({ layout: false, public: true })
 useHead({ title: useI18n().t('auth.login.title') })
