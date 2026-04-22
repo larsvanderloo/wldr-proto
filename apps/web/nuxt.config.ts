@@ -26,6 +26,15 @@ export default defineNuxtConfig({
     preset: process.env.NITRO_PRESET ?? 'node-server',
   },
 
+  // Vite/Rollup heeft moeite om pnpm-workspace ESM-packages te resolven op
+  // Vercel (CommonJS resolver kan exports field niet vinden). noExternal
+  // dwingt Nuxt om deze packages mee te bundelen ipv extern te behandelen.
+  vite: {
+    ssr: {
+      noExternal: ['@hr-saas/contracts', '@hr-saas/db'],
+    },
+  },
+
   i18n: {
     defaultLocale: 'nl-NL',
     strategy: 'no_prefix',
