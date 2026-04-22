@@ -2,7 +2,8 @@
 
 - **Periode**: 2026-04-21 t/m 2026-05-02
 - **Scrum-master / facilitator**: pm
-- **Status**: in-progress
+- **Status**: closed
+- **Gesloten**: 2026-04-21 (dag 2 — bootstrap volledig, sprintdoel behaald, schone knip naar Sprint 2)
 
 ## Sprintdoel
 
