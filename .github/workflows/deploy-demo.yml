@@ -14,6 +14,10 @@ name: Deploy · demo (Fly.io + Vercel + Neon)
 #   PII_ENCRYPTION_KEY  — 32-byte hex string. Gebruik NOOIT de dev-key hier.
 #                         Genereer: openssl rand -hex 32
 #   FLY_API_TOKEN       — deploy-token. Genereer: fly tokens create deploy -a hr-saas-api-demo
+#   JWT_SECRET          — 32-byte hex. Genereer: openssl rand -hex 32
+#                         Sync via: fly secrets set JWT_SECRET=... + gh secret set JWT_SECRET
+#   COOKIE_SECRET       — 32-byte hex. Genereer: openssl rand -hex 32
+#                         Sync via: fly secrets set COOKIE_SECRET=... + gh secret set COOKIE_SECRET
 #   VERCEL_TOKEN        — personal access token uit vercel.com/account/tokens
 #   VERCEL_ORG_ID       — te vinden in vercel.com team-settings of .vercel/project.json
 #   VERCEL_PROJECT_ID   — te vinden in .vercel/project.json na `vercel link`
@@ -95,6 +99,8 @@ jobs:
       - name: Fly secrets synchroniseren
         # Zet secrets alleen als ze (nog) niet correct staan.
         # `fly secrets set` is idempotent: ongewijzigde waarden triggeren geen deploy.
+        # JWT_SECRET en COOKIE_SECRET worden bij elke deploy opnieuw gesynchroniseerd
+        # zodat rotaties in GitHub Secrets automatisch doorwerken op Fly.
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
@@ -102,6 +108,8 @@ jobs:
             DATABASE_URL="${{ secrets.NEON_DATABASE_URL }}" \
             DIRECT_URL="${{ secrets.NEON_DIRECT_URL }}" \
             PII_ENCRYPTION_KEY="${{ secrets.PII_ENCRYPTION_KEY }}" \
+            JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+            COOKIE_SECRET="${{ secrets.COOKIE_SECRET }}" \
             CORS_ALLOWED_ORIGINS="https://app.larsvdloo.com" \
             --app hr-saas-api-demo \
             --stage
@@ -238,3 +246,48 @@ jobs:
           echo "Demo deploy: $(date -u +%FT%TZ), sha=${GITHUB_SHA::7}, status=${{ job.status }}" \
             >> /tmp/deploy-demo.log
           cat /tmp/deploy-demo.log
+
+  # ─── Job 5: e2e ──────────────────────────────────────────────────────────
+  # Playwright E2E tegen de staging-URL na een succesvolle deploy.
+  # Runt ALLEEN na smoke-tests zodat een kapotte deploy nooit E2E triggert.
+  # Vereiste secrets: geen extra (gebruikt publieke staging-URL).
+  # Vereiste seed-data: acme-tenant + testgebruikers — zie docs/runbooks/seed-data.md.
+  #
+  # Activeer pas nadat backend AUTH-0001 t/m AUTH-0004 en frontend AUTH-0006 + AUTH-0007
+  # gedeployed zijn (dag 6+ sprint 2). Tot die tijd: job runt maar specs die backend
+  # vereisen zijn gemarkeerd met `test.skip` en zullen als "pending" getoond worden.
+  e2e:
+    name: E2E Playwright (staging)
+    runs-on: ubuntu-latest
+    needs: [smoke-test]
+    env:
+      E2E_BASE_URL: https://app.larsvdloo.com
+      E2E_API_BASE_URL: https://api.larsvdloo.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Playwright browsers installeren
+        run: pnpm --filter=@hr-saas/web exec playwright install --with-deps chromium
+
+      - name: E2E tests draaien
+        run: pnpm --filter=@hr-saas/web test:e2e
+
+      - name: Playwright rapport uploaden
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-demo-${{ github.sha }}
+          path: apps/web/playwright-report/
+          retention-days: 14
