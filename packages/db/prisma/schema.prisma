@@ -172,6 +172,23 @@ enum EmployeeRole {
   @@map("employee_role")
 }
 
+/// Postgres-backed token-bucket voor rate-limiting op auth-endpoints.
+/// Vervangt de in-memory rate-limiter uit apps/api/ (niet bruikbaar op serverless).
+/// Compositie-key: (bucketKey) waarbij bucketKey = "<ip>:<lowercase_email>".
+/// Geen tenant_id: rate-limit is pre-tenant-resolve (bij login weten we de tenant nog niet).
+/// Bewust GEEN RLS — dit is geen tenant-data.
+/// Zie ADR-0007 §V2 voor het ontwerp en het UPSERT-algoritme.
+model RateLimitBucket {
+  bucketKey String   @id @map("bucket_key")
+  count     Int      @default(0)
+  resetAt   DateTime @map("reset_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([resetAt])
+  @@map("rate_limit_buckets")
+}
+
 // Audit log — onmisbaar. Elke schrijfactie op PII-houdende entiteiten
 // produceert hier een rij in dezelfde transactie.
 model AuditEvent {
