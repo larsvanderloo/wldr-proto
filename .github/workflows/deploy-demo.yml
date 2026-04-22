@@ -150,7 +150,8 @@ jobs:
 
           BASE="https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env"
           AUTH="Authorization: Bearer ${VERCEL_TOKEN}"
-          QUERY="teamId=${VERCEL_TEAM_ID}"
+          # upsert=true zorgt dat POST een bestaande env-var update ipv 400 ENV_CONFLICT
+          QUERY="teamId=${VERCEL_TEAM_ID}&upsert=true"
 
           upsert_env() {
             local KEY="$1"
