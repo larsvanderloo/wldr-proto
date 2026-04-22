@@ -44,6 +44,11 @@ export default defineNuxtConfig({
     ],
     lazy: true,
     langDir: 'locales',
+    bundle: {
+      // Uitgeschakeld: veroorzaakt build-problemen en wordt deprecated in v10.
+      // Zie: https://github.com/nuxt-modules/i18n/issues/3238
+      optimizeTranslationDirective: false,
+    },
   },
 
   app: {
