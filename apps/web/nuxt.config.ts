@@ -13,7 +13,10 @@ export default defineNuxtConfig({
 
   typescript: {
     strict: true,
-    typeCheck: true,
+    // typeCheck tijdens build uitgeschakeld: vite-plugin-checker roept vue-tsc aan
+    // terwijl .nuxt/-types nog niet volledig zijn (race-conditie). Typecheck loopt
+    // als aparte stap in ci-local.sh (stap 4) en GitHub Actions.
+    typeCheck: false,
   },
 
   // Nitro preset: 'vercel' in productie, lokaal wordt de preset genegeerd.
