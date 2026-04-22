@@ -10,5 +10,9 @@ export default defineVitestConfig({
     ],
     // Niet falen bij nog lege testsuites tijdens scaffold-fase
     passWithNoTests: true,
+    // Unit-tests die geen Nuxt-context nodig hebben: node-omgeving
+    environmentMatchGlobs: [
+      ['tests/unit/**', 'node'],
+    ],
   },
 })

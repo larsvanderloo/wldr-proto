@@ -69,6 +69,30 @@
     "updated": "Changes saved",
     "deleted": "Employee deleted"
   },
+  "auth": {
+    "login": {
+      "title": "Sign in",
+      "subtitle": "Sign in with your organisation email address.",
+      "submit": "Sign in"
+    },
+    "fields": {
+      "email": "Email address",
+      "password": "Password",
+      "tenantSlug": "Organisation code",
+      "tenantSlugHint": "Found in the welcome email from your HR administrator."
+    },
+    "errors": {
+      "invalid_credentials": "Email address or password is incorrect.",
+      "rate_limited": "Too many sign-in attempts. Please try again in a few minutes.",
+      "csrf_mismatch": "Session expired. Refresh the page and try again.",
+      "refresh_revoked": "Session expired. Please sign in again.",
+      "unauthorized": "Access denied. Please sign in again.",
+      "forbidden": "You don't have permission for this action.",
+      "password_too_weak": "Password does not meet requirements (minimum 12 characters).",
+      "email_already_taken": "This email address is already in use."
+    },
+    "logout": "Sign out"
+  },
   "errors": {
     "generic": "Something went wrong. Try again.",
     "forbidden": "You don't have permission.",

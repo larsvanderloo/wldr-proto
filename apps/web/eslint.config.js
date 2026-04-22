@@ -164,7 +164,7 @@ export default tseslint.config(
           // want ze zijn geen gedeelde components — ze zijn routes.
           // Nuxt page-components mogen single-word zijn (routes, geen herbruikbare components).
           // Can is een gevestigd RBAC-patroon (vgl. casl.js <Can>) — bewust single-word.
-          ignores: ['index', '[id]', 'new', 'default', 'Can'],
+          ignores: ['index', '[id]', 'new', 'default', 'Can', 'login'],
         },
       ],
 
@@ -261,6 +261,7 @@ export default tseslint.config(
       'playwright.config.ts',
       'vitest.config.ts',
       'tests/e2e/**/*.ts',
+      'tests/unit/**/*.ts',
     ],
     languageOptions: {
       parserOptions: {

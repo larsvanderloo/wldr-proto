@@ -69,6 +69,30 @@
     "updated": "Wijzigingen opgeslagen",
     "deleted": "Medewerker verwijderd"
   },
+  "auth": {
+    "login": {
+      "title": "Inloggen",
+      "subtitle": "Log in met uw organisatie-e-mailadres.",
+      "submit": "Inloggen"
+    },
+    "fields": {
+      "email": "E-mailadres",
+      "password": "Wachtwoord",
+      "tenantSlug": "Organisatiecode",
+      "tenantSlugHint": "Gevonden in de welkomstmail van uw HR-beheerder."
+    },
+    "errors": {
+      "invalid_credentials": "E-mailadres of wachtwoord is onjuist.",
+      "rate_limited": "Te veel inlogpogingen. Probeer het over enkele minuten opnieuw.",
+      "csrf_mismatch": "Sessie is verlopen. Vernieuw de pagina en probeer opnieuw.",
+      "refresh_revoked": "Sessie is verlopen. Log opnieuw in.",
+      "unauthorized": "Geen toegang. Log opnieuw in.",
+      "forbidden": "U heeft geen rechten voor deze actie.",
+      "password_too_weak": "Wachtwoord voldoet niet aan de vereisten (minimaal 12 tekens).",
+      "email_already_taken": "Dit e-mailadres is al in gebruik."
+    },
+    "logout": "Uitloggen"
+  },
   "errors": {
     "generic": "Er ging iets mis. Probeer het opnieuw.",
     "forbidden": "Je hebt geen rechten voor deze actie.",

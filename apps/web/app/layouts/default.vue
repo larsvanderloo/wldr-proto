@@ -1,10 +1,15 @@
 <script setup lang="ts">
-const session = useSessionStore()
+const authStore = useAuthStore()
 const { t } = useI18n()
 
 const nav = computed(() => [
   { label: t('employees.title'), to: '/employees', icon: 'i-lucide-users' },
 ])
+
+async function onLogout() {
+  await authStore.logout()
+  await navigateTo('/login')
+}
 </script>
 
 <template>
@@ -16,11 +21,16 @@ const nav = computed(() => [
         </NuxtLink>
         <UNavigationMenu :items="nav" />
         <div class="ml-auto flex items-center gap-3">
-          <UAvatar
-            v-if="session.user"
-            :alt="`${session.user.firstName} ${session.user.lastName}`"
-            size="sm"
-          />
+          <UDropdownMenu
+            v-if="authStore.user"
+            :items="[[{ label: t('auth.logout'), icon: 'i-lucide-log-out', onSelect: onLogout }]]"
+          >
+            <UAvatar
+              :alt="authStore.user.email"
+              size="sm"
+              class="cursor-pointer"
+            />
+          </UDropdownMenu>
         </div>
       </div>
     </header>

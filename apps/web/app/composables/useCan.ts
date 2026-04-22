@@ -1,40 +1,44 @@
-import { useSessionStore } from '~/stores/session'
+import type { Role } from '@hr-saas/contracts/auth'
 
 /**
  * useCan — lichtgewicht RBAC-helper.
- * NB: de autoritatieve check gebeurt op de backend. Dit is alleen UI-gating.
+ *
+ * Leest de rol van de ingelogde gebruiker uit de auth-store (AUTH-0006/F6).
+ * Rollen komen uit de JWT-claims: 'hr_admin' | 'manager' | 'employee'.
+ *
+ * NB: de autoritatieve check gebeurt op de backend. Dit is uitsluitend UI-gating.
  */
 
 type Subject = 'employee' | 'employee.pii' | 'time_off' | 'review'
 type Action = 'read' | 'create' | 'update' | 'delete' | 'reveal'
 
-const matrix: Record<Subject, Partial<Record<Action, Array<'admin' | 'manager' | 'employee'>>>> = {
+const matrix: Record<Subject, Partial<Record<Action, Role[]>>> = {
   employee: {
-    read: ['admin', 'manager', 'employee'],
-    create: ['admin'],
-    update: ['admin', 'manager'],
-    delete: ['admin'],
+    read: ['hr_admin', 'manager', 'employee'],
+    create: ['hr_admin'],
+    update: ['hr_admin', 'manager'],
+    delete: ['hr_admin'],
   },
   'employee.pii': {
-    reveal: ['admin'],
-    read: ['admin'],
+    reveal: ['hr_admin'],
+    read: ['hr_admin'],
   },
   time_off: {
-    read: ['admin', 'manager', 'employee'],
-    create: ['admin', 'manager', 'employee'],
-    update: ['admin', 'manager'],
+    read: ['hr_admin', 'manager', 'employee'],
+    create: ['hr_admin', 'manager', 'employee'],
+    update: ['hr_admin', 'manager'],
   },
   review: {
-    read: ['admin', 'manager', 'employee'],
-    create: ['admin', 'manager'],
-    update: ['admin', 'manager'],
+    read: ['hr_admin', 'manager', 'employee'],
+    create: ['hr_admin', 'manager'],
+    update: ['hr_admin', 'manager'],
   },
 }
 
 export function useCan() {
-  const session = useSessionStore()
+  const authStore = useAuthStore()
   return (action: Action, subject: Subject): boolean => {
-    const role = session.role
+    const role = authStore.user?.role
     if (!role) return false
     const allowed = matrix[subject]?.[action] ?? []
     return allowed.includes(role)
