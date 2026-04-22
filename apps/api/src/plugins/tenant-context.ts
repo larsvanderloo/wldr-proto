@@ -1,50 +1,43 @@
+/**
+ * TenantContext plugin — backward-compat shim (AUTH-0008).
+ *
+ * Sprint 1 gebruikte x-tenant-id / x-user-id / x-user-role headers.
+ * Sprint 2: deze headers zijn VERWIJDERD. De echte context komt uit
+ * de auth-context plugin (JWT → request.user).
+ *
+ * Dit plugin biedt nog steeds de `req.tenantId` / `req.userId` / `req.userRole`
+ * properties voor backward-compat met bestaande employee-service aanroepen.
+ * Ze worden gevuld vanuit request.user (gezet door auth-context plugin).
+ *
+ * BELANGRIJK: auth-context plugin MOET vóór tenant-context geregistreerd zijn.
+ */
+
 import fp from 'fastify-plugin'
 import type { FastifyPluginAsync } from 'fastify'
-
-/**
- * TenantContext plugin.
- *
- * In productie wordt de tenant afgeleid uit een gevalideerde sessie-cookie of
- * JWT. Voor de seed lezen we `x-tenant-id` + `x-user-id` headers. De auth-agent
- * vervangt dit door echte sessieverificatie.
- *
- * De waarden worden op de request gezet, maar de ENIGE bindende tenant-scoping
- * gebeurt in de repository-laag via `withTenant()` — die zet `app.tenant_id`
- * binnen de transactie zodat RLS-policies filteren.
- */
+import type { JwtClaims } from '@hr-saas/contracts/auth'
 
 declare module 'fastify' {
   interface FastifyRequest {
     tenantId: string
     userId: string
-    userRole: 'admin' | 'manager' | 'employee'
+    userRole: JwtClaims['role']
   }
 }
 
 const plugin: FastifyPluginAsync = async (app) => {
-  app.addHook('onRequest', async (req, reply) => {
-    // Health-check en openbare endpoints overslaan
-    if (req.url === '/healthz' || req.url.startsWith('/v1/auth/')) return
-
-    const tenantId = req.headers['x-tenant-id']
-    const userId = req.headers['x-user-id']
-    const userRole = req.headers['x-user-role']
-
-    if (typeof tenantId !== 'string' || typeof userId !== 'string') {
-      return reply.code(401).send({
-        type: 'https://hr-saas.example/problems/unauthenticated',
-        title: 'Niet geauthenticeerd',
-        status: 401,
-        detail: 'Tenant- of user-context ontbreekt.',
-      })
+  app.addHook('preHandler', async (req) => {
+    // Vul tenantId/userId/userRole vanuit request.user (auth-context output).
+    // Op publieke routes is request.user null — dan blijven de properties leeg.
+    // De employee-service assertUser() blokkeert calls zonder request.user.
+    if (req.user) {
+      req.tenantId = req.user.tenantId
+      req.userId = req.user.id
+      req.userRole = req.user.role
     }
-
-    req.tenantId = tenantId
-    req.userId = userId
-    req.userRole = (userRole as 'admin' | 'manager' | 'employee') ?? 'employee'
-
-    req.log = req.log.child({ tenantId, userId })
   })
 }
 
-export const tenantContextPlugin = fp(plugin, { name: 'tenant-context' })
+export const tenantContextPlugin = fp(plugin, {
+  name: 'tenant-context',
+  dependencies: ['auth-context'],
+})

@@ -2,10 +2,12 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
+import cookie from '@fastify/cookie'
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod'
 
-import { tenantContextPlugin } from './plugins/tenant-context.js'
+import { authContextPlugin } from './plugins/auth-context.js'
 import { errorHandler } from './plugins/error-handler.js'
+import { authModule } from './modules/auth/controller.js'
 import { employeesModule } from './modules/employees/controller.js'
 
 /**
@@ -38,12 +40,16 @@ export async function buildApp(): Promise<FastifyInstance> {
         paths: [
           'req.headers.authorization',
           'req.headers.cookie',
+          'req.body.password',
           'req.body.bsn',
           'req.body.iban',
           'req.body.phoneNumber',
           'req.body.address',
           '*.bsn',
           '*.iban',
+          '*.password',
+          '*.passwordHash',
+          '*.password_hash',
         ],
         censor: '[redacted]',
       },
@@ -65,14 +71,25 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(rateLimit, {
     max: 300,
     timeWindow: '1 minute',
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tenantContextPlugin wordt pas ná rateLimit geregistreerd; op dit moment is tenantId nog niet op het request-type gedecoreerd
-    keyGenerator: (req) => `${req.ip}:${(req as any).tenantId ?? 'anon'}`,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tenantId is nog niet gedecoreerd op dit moment
+    keyGenerator: (req) => `${req.ip}:${(req as any).user?.tenantId ?? 'anon'}`,
   })
 
-  await app.register(tenantContextPlugin)
+  // Cookie-plugin — vereist voor httpOnly refresh-token (ADR-0006)
+  await app.register(cookie, {
+    secret: process.env.COOKIE_SECRET ?? 'dev-only-cookie-secret-change-in-production',
+  })
 
-  app.get('/healthz', async () => ({ status: 'ok' }))
+  // Auth-context plugin: JWT-validatie + request.user decoratie.
+  // Geregistreerd VOOR de route-modules zodat hooks actief zijn op alle routes.
+  await app.register(authContextPlugin)
 
+  app.get('/healthz', {
+    config: { public: true },
+    handler: async () => ({ status: 'ok' }),
+  })
+
+  await app.register(authModule, { prefix: '/v1' })
   await app.register(employeesModule, { prefix: '/v1' })
 
   return app

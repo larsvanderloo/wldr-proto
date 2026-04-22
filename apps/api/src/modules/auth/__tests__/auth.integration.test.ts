@@ -167,6 +167,7 @@ describe('POST /v1/auth/refresh', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/auth/refresh',
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       cookies: { hr_refresh: cookies['hr_refresh']!, hr_csrf: cookies['hr_csrf']! },
       // Geen x-csrf-token header
     })
@@ -179,6 +180,7 @@ describe('POST /v1/auth/refresh', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/auth/refresh',
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       cookies: { hr_refresh: cookies['hr_refresh']!, hr_csrf: cookies['hr_csrf']! },
       headers: { 'x-csrf-token': 'wrong-csrf-token' },
     })
@@ -188,7 +190,9 @@ describe('POST /v1/auth/refresh', () => {
 
   it('[US-3] oud refresh-token is ongeldig na rotatie', async () => {
     const cookies = await loginAndGetCookies()
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const hrRefresh = cookies['hr_refresh']!
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const hrCsrf = cookies['hr_csrf']!
 
     // Eerste refresh — succes
@@ -224,6 +228,7 @@ describe('POST /v1/auth/logout', () => {
     const logoutRes = await app.inject({
       method: 'POST',
       url: '/v1/auth/logout',
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       cookies: { hr_refresh: cookies['hr_refresh']!, hr_csrf: cookies['hr_csrf']! },
     })
 

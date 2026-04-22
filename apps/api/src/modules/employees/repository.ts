@@ -17,10 +17,60 @@ function maskIban(iban: string): string {
   return `${iban.slice(0, 4)} **** **** **${iban.slice(-2)}`
 }
 
-export async function listEmployees(tenantId: string, query: EmployeeListQuery) {
+interface RbacFilter {
+  /** employee-rol: filter op user.id via user-join (employee_id op users-tabel) */
+  employeeIdFilter?: string
+  /** manager-rol: toon eigen record + directe rapporten */
+  managerIdFilter?: string
+  /** caller's user.id — voor manager "eigen record" */
+  callerUserId?: string
+}
+
+export async function listEmployees(tenantId: string, query: EmployeeListQuery, rbac?: RbacFilter) {
   return withTenant(tenantId, async (tx) => {
+    // RBAC-where:
+    // - employee: alleen het employee-record gekoppeld aan de ingelogde user
+    // - manager: eigen employee-record + directe rapporten (manager_id = employeeId van caller)
+    // - hr_admin: geen extra filter (RLS scopet al op tenant)
+    let rbacWhere: Prisma.EmployeeWhereInput = {}
+
+    if (rbac?.employeeIdFilter) {
+      // Employee: zoek het employee-record dat gekoppeld is aan de user
+      rbacWhere = {
+        users: { some: { id: rbac.employeeIdFilter, deletedAt: null } },
+      }
+    } else if (rbac?.managerIdFilter) {
+      // Manager: directe rapporten (manager_id = eigen employee.id)
+      // of het eigen employee-record (via user-join)
+      rbacWhere = {
+        OR: [
+          { users: { some: { id: rbac.managerIdFilter, deletedAt: null } } },
+          { managerId: { not: null }, users: { some: { id: rbac.managerIdFilter, deletedAt: null } }, manager: { users: { some: { id: rbac.managerIdFilter, deletedAt: null } } } },
+        ],
+      }
+      // Eenvoudigere variant: manager_id via de employee die gelinkt is aan de caller
+      // We doen een subquery: welk employee.id heeft de caller?
+      // Voor MVP: haal employee.id van de caller op en filter op managerId
+      const callerEmployee = await tx.user.findUnique({
+        where: { id: rbac.managerIdFilter },
+        select: { employeeId: true },
+      })
+      if (callerEmployee?.employeeId) {
+        rbacWhere = {
+          OR: [
+            { id: callerEmployee.employeeId }, // eigen record
+            { managerId: callerEmployee.employeeId }, // directe rapporten
+          ],
+        }
+      } else {
+        // Manager zonder employee_id: alleen eigen record (leeg resultaat)
+        rbacWhere = { id: '__no_match__' }
+      }
+    }
+
     const where: Prisma.EmployeeWhereInput = {
       deletedAt: null,
+      ...rbacWhere,
       ...(query.search && {
         OR: [
           { firstName: { contains: query.search, mode: 'insensitive' } },

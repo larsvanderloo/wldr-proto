@@ -41,5 +41,26 @@ export async function withTenant<T>(
   })
 }
 
+/**
+ * Voer een callback uit ZONDER tenant-scope (geen RLS-setting).
+ *
+ * Gebruik uitsluitend voor bootstrapping-queries waarbij de tenant nog niet
+ * bekend is: token-hash lookup (refresh/logout flow), tenant-detectie bij login.
+ *
+ * WAARSCHUWING: deze functie bypass RLS. Gebruik hem alleen voor:
+ * 1. SELECT op niet-tenant-scoped tabellen (tenants)
+ * 2. Token-hash lookups waarbij we de tenantId willen BEPALEN
+ * Nooit voor employee-data of andere PII.
+ *
+ * De caller is verantwoordelijk voor het beperken van de query tot de
+ * minimale benodigde velden (alleen tenant_id — geen user data).
+ */
+export async function withoutRls<T>(
+  callback: (client: PrismaClient) => Promise<T>,
+): Promise<T> {
+  const prisma = getPrisma()
+  return callback(prisma)
+}
+
 export { PrismaClient } from '@prisma/client'
 export type { Prisma } from '@prisma/client'
