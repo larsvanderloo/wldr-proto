@@ -147,3 +147,33 @@ Als `email_domain` niet matcht: 401 generic — geen onderscheid "tenant niet ge
 - AUTH-0007 (frontend): Nuxt route-middleware leest auth-store; bij missing/expired access-token roept `/auth/refresh` (cookies gaan automatisch mee).
 - Runbook (`devops-qa`): operationele stappen voor `email_domain` op nieuwe tenants + JWT_SECRET-rotatie procedure.
 - Toekomst (FEAT-0012): user-cascade bij employee hard-delete; refresh-token cleanup-job (cron) wanneer Sprint 2's "lazy cleanup at refresh-call" niet meer voldoet.
+
+## Addendum 2026-04-22 — cookie-scope same-origin (Sprint 2.5, ADR-0007 V4)
+
+**Wijziging**: `Domain=.larsvdloo.com` op `hr_refresh` en `hr_csrf` cookies vervalt. `Path` wijzigt van `/v1/auth` naar `/api/v1/auth`.
+
+**Reden**: ADR-0007 migreert de API naar Nitro server routes onder dezelfde origin als de frontend (`app.larsvdloo.com`). De `Domain`-attribuut was nodig voor cross-origin cookie-deling tussen `app.larsvdloo.com` en `api.larsvdloo.com`. Bij same-origin is het overbodig en zelfs onveiliger: een `Domain=.larsvdloo.com` cookie lekt naar willekeurige andere subdomains (`marketing.larsvdloo.com`, `staging.larsvdloo.com`, etc.). Default-behavior (geen `Domain`) bindt de cookie aan exact `app.larsvdloo.com`.
+
+**Nieuwe Set-Cookie-shape** (vervangt het voorbeeld in §1):
+
+```
+Set-Cookie: hr_refresh=<token>; HttpOnly; Secure; SameSite=Lax;
+            Path=/api/v1/auth; Max-Age=604800
+Set-Cookie: hr_csrf=<token>; Secure; SameSite=Lax;
+            Path=/api/v1/auth; Max-Age=604800
+```
+
+**Wat blijft**:
+
+- `HttpOnly` op `hr_refresh`, geen `HttpOnly` op `hr_csrf` (frontend leest deze JS-side voor de `X-CSRF-Token`-header).
+- `Secure` in productie; weglaten lokaal (`NODE_ENV !== 'production'`).
+- `SameSite=Lax` ongewijzigd — same-origin maakt CSRF nóg minder relevant maar de double-submit check blijft als belt-and-suspenders.
+- Alle CSRF-mitigatie uit §2 ongewijzigd.
+
+**Migratie-impact**:
+
+- Bestaande sessies (op productie) waarbij de cookie met `Domain=.larsvdloo.com` is gezet, blijven werken tot de browser ze verloopt (max-age 7d) of de gebruiker uitlogt — de browser stuurt beide varianten mee bij requests naar `app.larsvdloo.com`. Geen forced logout nodig.
+- Lokale dev: geen wijziging, `NODE_ENV !== 'production'` zette `Domain` al niet.
+- `cookieDomain()`-helper in `apps/api/src/modules/auth/controller.ts` is overbodig in de Nitro-versie en wordt niet overgenomen in `apps/web/server/utils/cookies.ts`.
+
+**Status**: dit addendum vervangt §1 cookie-shape en §"`Domain=.larsvdloo.com`"-bullet onder Negatief / trade-offs. De rest van ADR-0006 (split-token, CSRF double-submit, tenant-detectie, users↔employees) blijft onveranderd geldig.

@@ -247,6 +247,28 @@ export default tseslint.config(
     },
   },
 
+  // --- Nitro server-routes (apps/web/server/) ---
+  // server/ valt buiten de Nuxt-gegenereerde tsconfig (.nuxt/tsconfig.json bevat
+  // alleen app/**). Type-aware rules uitzetten — projectService kent server/ niet.
+  // Globals worden niet meegegeven: server-routes gebruiken geen Nuxt-client-composables.
+  {
+    files: ['server/**/*.ts'],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/await-thenable': 'off',
+      '@typescript-eslint/no-misused-promises': 'off',
+    },
+  },
+
   // --- Config- en tool-bestanden in apps/web: geen type-aware rules ---
   // app.vue, nuxt.config.ts, colada.options.ts, playwright.config.ts, vitest.config.ts
   // en E2E-tests vallen buiten de Nuxt-gegenereerde tsconfig (.nuxt/tsconfig.json).
