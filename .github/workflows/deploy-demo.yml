@@ -77,14 +77,55 @@ jobs:
           DIRECT_URL: ${{ secrets.NEON_DIRECT_URL }}
         run: pnpm --filter=@hr-saas/db migrate:deploy
 
-  # ─── Job 2: deploy-api ────────────────────────────────────────────────────
+  # ─── Job 2: seed ─────────────────────────────────────────────────────────
+  # Seed de Neon-DB met testdata (acme-tenant + 3 testgebruikers).
+  # Idempotent via upsert — meerdere runs zijn veilig.
+  # Vereist NEON_DIRECT_URL: seeding werkt NIET via PgBouncer (advisory locks).
+  # Zie docs/runbooks/seed-data.md voor details en troubleshooting.
+  seed:
+    name: Seed testdata (Neon direct)
+    runs-on: ubuntu-latest
+    environment: demo
+    needs: [migrate]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build contracts
+        run: pnpm --filter=@hr-saas/contracts build
+
+      - name: Prisma generate
+        env:
+          DATABASE_URL: ${{ secrets.NEON_DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.NEON_DIRECT_URL }}
+        run: pnpm --filter=@hr-saas/db generate
+
+      - name: Seed testdata (idempotent)
+        env:
+          DATABASE_URL: ${{ secrets.NEON_DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.NEON_DIRECT_URL }}
+          PII_ENCRYPTION_KEY: ${{ secrets.PII_ENCRYPTION_KEY }}
+        run: pnpm --filter=@hr-saas/db prisma db seed
+
+  # ─── Job 3: deploy-api ────────────────────────────────────────────────────
   # Bouwt en deployt de Fastify-container naar Fly.io (Amsterdam).
   # --remote-only: Fly bouwt de image in de cloud, geen lokale Docker nodig.
   deploy-api:
     name: Deploy API naar Fly.io
     runs-on: ubuntu-latest
     environment: demo
-    needs: [migrate]
+    needs: [seed]
     steps:
       - uses: actions/checkout@v4
 
@@ -135,16 +176,15 @@ jobs:
           fi
           echo "API bereikbaar — HTTP $STATUS"
 
-  # ─── Job 3: deploy-web ────────────────────────────────────────────────────
+  # ─── Job 4: deploy-web ────────────────────────────────────────────────────
   # Deployt de Nuxt-app naar Vercel.
   # Parallel met deploy-api — web heeft geen directe DB-afhankelijkheid.
-  # Wacht WEL op migrate: een nieuwe web-build mag alleen live als de DB-schema
-  # up-to-date is (backward-compat migraties; zie non-negotiables in CLAUDE.md).
+  # Wacht op seed: E2E na deploy vereist aanwezige testdata.
   deploy-web:
     name: Deploy web naar Vercel
     runs-on: ubuntu-latest
     environment: demo
-    needs: [migrate]
+    needs: [seed]
     steps:
       - uses: actions/checkout@v4
 
@@ -211,7 +251,7 @@ jobs:
           fi
           echo "Web bereikbaar — HTTP $STATUS"
 
-  # ─── Job 4: smoke-test ────────────────────────────────────────────────────
+  # ─── Job 5: smoke-test ────────────────────────────────────────────────────
   # Minimale rook-test na beide deploys: verifieer dat API en web bereikbaar zijn
   # en dat de CORS-headers correct zijn (web mag API aanroepen).
   smoke-test:
@@ -247,7 +287,7 @@ jobs:
             >> /tmp/deploy-demo.log
           cat /tmp/deploy-demo.log
 
-  # ─── Job 5: e2e ──────────────────────────────────────────────────────────
+  # ─── Job 6: e2e ──────────────────────────────────────────────────────────
   # Playwright E2E tegen de staging-URL na een succesvolle deploy.
   # Runt ALLEEN na smoke-tests zodat een kapotte deploy nooit E2E triggert.
   # Vereiste secrets: geen extra (gebruikt publieke staging-URL).
