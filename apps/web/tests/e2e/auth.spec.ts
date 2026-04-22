@@ -3,7 +3,7 @@
  *
  * Vereisten om te draaien:
  *   - E2E_BASE_URL wijst naar een werkende staging-instantie (https://app.larsvdloo.com)
- *   - Seed-data aanwezig: acme-tenant + admin@acme.test / Welkom01!Welkom
+ *   - Seed-data aanwezig: acme-tenant + hr_admin@acme.test / Welkom01!Welkom
  *     (zie docs/runbooks/seed-data.md)
  *   - Backend AUTH-0001 t/m AUTH-0004 deployed (login + refresh endpoints actief)
  *   - Frontend AUTH-0006 + AUTH-0007 deployed (loginpagina + auth-guard)
@@ -16,7 +16,7 @@ import { test, expect } from '@playwright/test'
 
 // Seed-credentials — alleen voor testomgeving. Nooit echte wachtwoorden.
 const SEED_USER = {
-  email: 'admin@acme.test',
+  email: 'hr_admin@acme.test',
   password: 'Welkom01!Welkom',
 }
 
