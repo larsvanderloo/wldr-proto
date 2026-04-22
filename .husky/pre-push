@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# .husky/pre-push
+# Draait de volledige lokale CI-suite voor elke push.
+# Blokkeer de push bij elke fout — "bij mij werkt het" bestaat niet.
+bash scripts/ci-local.sh
