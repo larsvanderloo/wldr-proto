@@ -116,7 +116,7 @@ jobs:
           DATABASE_URL: ${{ secrets.NEON_DIRECT_URL }}
           DIRECT_URL: ${{ secrets.NEON_DIRECT_URL }}
           PII_ENCRYPTION_KEY: ${{ secrets.PII_ENCRYPTION_KEY }}
-        run: pnpm --filter=@hr-saas/db prisma db seed
+        run: pnpm --filter=@hr-saas/db exec prisma db seed
 
   # ─── Job 3: deploy-api ────────────────────────────────────────────────────
   # Bouwt en deployt de Fastify-container naar Fly.io (Amsterdam).
