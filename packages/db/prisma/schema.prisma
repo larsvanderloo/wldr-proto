@@ -22,56 +22,125 @@ datasource db {
 }
 
 model Tenant {
-  id          String   @id @default(uuid()) @db.Uuid
+  id          String    @id @default(uuid()) @db.Uuid
   name        String
-  slug        String   @unique
-  region      String   @default("eu-west-1")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  slug        String    @unique
+  /// E-mail-domein voor tenant-detectie bij login (bv "acme.nl"). Uniek of NULL.
+  /// Zie ADR-0006 § 3 — primaire tenant-detectie via email-domein-lookup.
+  emailDomain String?   @unique @map("email_domain")
+  region      String    @default("eu-west-1")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
 
-  employees Employee[]
+  employees     Employee[]
+  users         User[]
+  refreshTokens RefreshToken[]
 
   @@map("tenants")
 }
 
 model Employee {
-  id               String   @id @default(uuid()) @db.Uuid
-  tenantId         String   @map("tenant_id") @db.Uuid
-  firstName        String   @map("first_name")
-  lastName         String   @map("last_name")
+  id               String           @id @default(uuid()) @db.Uuid
+  tenantId         String           @map("tenant_id") @db.Uuid
+  firstName        String           @map("first_name")
+  lastName         String           @map("last_name")
   email            String
-  jobTitle         String   @map("job_title")
+  jobTitle         String           @map("job_title")
   department       String?
-  managerId        String?  @map("manager_id") @db.Uuid
-  employmentType   EmploymentType  @map("employment_type")
+  managerId        String?          @map("manager_id") @db.Uuid
+  employmentType   EmploymentType   @map("employment_type")
   employmentStatus EmploymentStatus @default(active) @map("employment_status")
   role             EmployeeRole     @default(employee)
-  startDate        DateTime @map("start_date") @db.Date
-  endDate          DateTime? @map("end_date") @db.Date
-  phoneNumber      String?  @map("phone_number")
+  startDate        DateTime         @map("start_date") @db.Date
+  endDate          DateTime?        @map("end_date") @db.Date
+  phoneNumber      String?          @map("phone_number")
 
   // PII — kolom-level encrypted (pgcrypto). Prisma leest ze als Bytes;
   // de repository decrypteert met app-level key. Nooit direct tonen.
-  bsnEncrypted     Bytes?   @map("bsn_encrypted")
-  ibanEncrypted    Bytes?   @map("iban_encrypted")
+  bsnEncrypted  Bytes? @map("bsn_encrypted")
+  ibanEncrypted Bytes? @map("iban_encrypted")
 
   // Adres als JSONB — niet-PII volgens GDPR-classificatie
-  address          Json?
+  address Json?
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
-  tenant    Tenant    @relation(fields: [tenantId], references: [id])
-  manager   Employee? @relation("DirectReports", fields: [managerId], references: [id])
-  reports   Employee[] @relation("DirectReports")
+  tenant  Tenant     @relation(fields: [tenantId], references: [id])
+  manager Employee?  @relation("DirectReports", fields: [managerId], references: [id])
+  reports Employee[] @relation("DirectReports")
+  users   User[]
 
   @@unique([tenantId, email])
   @@index([tenantId, lastName])
   @@index([tenantId, department])
   @@index([tenantId, employmentStatus])
   @@map("employees")
+}
+
+/// Auth-account. Een tenant heeft 0..N users.
+/// Een user kan optioneel gekoppeld zijn aan een employee (zie ADR-0006 § 4):
+/// - hr_admin: employee_id MAG nullable zijn (puur administratieve account).
+/// - manager / employee: employee_id is verplicht (afgedwongen in service-laag).
+///
+/// PII-beleid (zie ADR-0006 § 5): email is plaintext in deze tabel,
+/// bewust afwijkend van employees.email — login-flow vereist plaintext lookup.
+/// RLS + bcrypt zijn de overgebleven beveiligingslagen.
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  email        String
+  passwordHash String   @map("password_hash")
+  role         UserRole
+  employeeId   String?  @map("employee_id") @db.Uuid
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  employee      Employee?      @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  refreshTokens RefreshToken[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId, role])
+  @@map("users")
+}
+
+enum UserRole {
+  hr_admin
+  manager
+  employee
+
+  @@map("user_role")
+}
+
+/// Refresh-token rotatie-tabel. Opaque random bytes worden NOOIT plaintext
+/// opgeslagen — alleen sha256-hash. Een gebruikt of verlopen token is ongeldig
+/// (revokedAt gezet). Zie ADR-0006 § 1 + AUTH-0003.
+///
+/// Geen audit-trigger op deze tabel: high-volume + ephemeral. Login/logout
+/// worden via de users-trigger geaudit; refresh is geen significante event.
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  /// sha256(refresh_token_plaintext) — 64 hex chars. Plaintext bestaat alleen
+  /// in de cookie aan client-zijde + tijdens uitgifte/lookup in memory.
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  /// Gezet bij rotatie of expliciete logout. Een gerevoked token is per definitie ongeldig.
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([tenantId, expiresAt])
+  @@map("refresh_tokens")
 }
 
 enum EmploymentType {
@@ -106,7 +175,7 @@ model AuditEvent {
   id         String   @id @default(uuid()) @db.Uuid
   tenantId   String   @map("tenant_id") @db.Uuid
   userId     String   @map("user_id") @db.Uuid
-  action     String   // bv "employee.update", "employee.reveal_bsn"
+  action     String // bv "employee.update", "employee.reveal_bsn"
   entityType String   @map("entity_type")
   entityId   String   @map("entity_id") @db.Uuid
   metadata   Json?
