@@ -8,12 +8,13 @@ import type { JwtClaims, LoginRequest, User } from '@hr-saas/contracts/auth'
  * - access_token leeft uitsluitend in memory (Pinia state) — nooit in
  *   localStorage of sessionStorage (ADR-0006 § 1).
  * - refresh_token is een httpOnly-cookie die de browser automatisch meestuurt
- *   op /v1/auth/* — de frontend ziet hem niet.
+ *   op /api/v1/auth/* — de frontend ziet hem niet.
  * - CSRF double-submit: hr_csrf-cookie (niet-httpOnly) wordt bij refresh
  *   meegestuurd als X-CSRF-Token header.
  *
  * Testbaarheid: apiBase is via setAuthApiBase() overschrijfbaar zodat tests
- * geen Nuxt-app-instantie nodig hebben.
+ * geen Nuxt-app-instantie nodig hebben. In productie wordt de relatieve
+ * base /api/v1 gebruikt (same-origin Nitro routes, INFRA-0020).
  */
 
 let _apiBase: string | null = null
@@ -30,7 +31,8 @@ let _getCsrfToken: () => string | undefined = () => {
 /** Intern gebruik: geeft de geconfigureerde API base URL. */
 function getApiBase(): string {
   if (_apiBase !== null) return _apiBase
-  return (useRuntimeConfig().public.apiBase as string)
+  // Same-origin Nitro routes (INFRA-0020) — geen runtimeConfig-afhankelijkheid meer.
+  return '/api/v1'
 }
 
 function getCsrfToken(): string | undefined {
@@ -83,7 +85,7 @@ export const useAuthStore = defineStore('auth', {
      */
     async login(credentials: LoginRequest): Promise<void> {
       const data = await $fetch<{ access_token: string; expires_in: number; token_type: 'Bearer' }>(
-        `${getApiBase()}/v1/auth/login`,
+        `${getApiBase()}/auth/login`,
         {
           method: 'POST',
           body: credentials,
@@ -106,7 +108,7 @@ export const useAuthStore = defineStore('auth', {
       try {
         const csrfToken = getCsrfToken()
         const data = await $fetch<{ access_token: string; expires_in: number; token_type: 'Bearer' }>(
-          `${getApiBase()}/v1/auth/refresh`,
+          `${getApiBase()}/auth/refresh`,
           {
             method: 'POST',
             credentials: 'include',
@@ -128,7 +130,7 @@ export const useAuthStore = defineStore('auth', {
     async logout(): Promise<void> {
       try {
         const csrfToken = getCsrfToken()
-        await $fetch(`${getApiBase()}/v1/auth/logout`, {
+        await $fetch(`${getApiBase()}/auth/logout`, {
           method: 'POST',
           credentials: 'include',
           headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : {},

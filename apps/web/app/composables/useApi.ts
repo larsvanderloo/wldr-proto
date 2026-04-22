@@ -1,6 +1,7 @@
 /**
  * Gedeelde API-fetcher (AUTH-0008).
  *
+ * - Prat same-origin met /api/v1 (Nitro server routes, INFRA-0020).
  * - Zet `Authorization: Bearer <access_token>` automatisch.
  * - Intercept 401 `token_expired`: probeert één keer stille refresh,
  *   herhaalt de call. Tweede 401 → redirect /login.
@@ -9,12 +10,11 @@
  * - Server-state gebruikt altijd DIT, nooit useFetch/fetch direct.
  */
 export function useApi() {
-  const config = useRuntimeConfig()
   const authStore = useAuthStore()
   const router = useRouter()
 
   return $fetch.create({
-    baseURL: config.public.apiBase as string,
+    baseURL: '/api/v1',
     credentials: 'include',
 
     onRequest({ options }) {

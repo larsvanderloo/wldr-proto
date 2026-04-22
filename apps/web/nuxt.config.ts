@@ -26,14 +26,6 @@ export default defineNuxtConfig({
     preset: process.env.NITRO_PRESET ?? 'node-server',
   },
 
-  runtimeConfig: {
-    public: {
-      // Overschrijf in productie via NUXT_PUBLIC_API_BASE op Vercel.
-      // Lokaal: http://localhost:4000. Demo-productie: https://api.larsvdloo.com.
-      apiBase: process.env.NUXT_PUBLIC_API_BASE ?? 'http://localhost:4000',
-    },
-  },
-
   i18n: {
     defaultLocale: 'nl-NL',
     strategy: 'no_prefix',

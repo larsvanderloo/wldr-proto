@@ -1,4 +1,4 @@
-name: Deploy · demo (Fly.io + Vercel + Neon)
+name: Deploy · demo (Vercel + Neon)
 
 # Trigger: elke push naar main.
 # Dit is de demo-pipeline (ADR-0004). De productie-pipeline (AWS ECS) volgt
@@ -13,14 +13,19 @@ name: Deploy · demo (Fly.io + Vercel + Neon)
 #                         ?sslmode=require&connect_timeout=10
 #   PII_ENCRYPTION_KEY  — 32-byte hex string. Gebruik NOOIT de dev-key hier.
 #                         Genereer: openssl rand -hex 32
-#   FLY_API_TOKEN       — deploy-token. Genereer: fly tokens create deploy -a hr-saas-api-demo
 #   JWT_SECRET          — 32-byte hex. Genereer: openssl rand -hex 32
-#                         Sync via: fly secrets set JWT_SECRET=... + gh secret set JWT_SECRET
+#                         Sync via: gh secret set JWT_SECRET (pipeline zet Vercel via vercel-env-sync)
 #   COOKIE_SECRET       — 32-byte hex. Genereer: openssl rand -hex 32
-#                         Sync via: fly secrets set COOKIE_SECRET=... + gh secret set COOKIE_SECRET
+#                         Sync via: gh secret set COOKIE_SECRET (idem)
 #   VERCEL_TOKEN        — personal access token uit vercel.com/account/tokens
 #   VERCEL_ORG_ID       — te vinden in vercel.com team-settings of .vercel/project.json
 #   VERCEL_PROJECT_ID   — te vinden in .vercel/project.json na `vercel link`
+#   VERCEL_TEAM_ID      — team-ID uit Vercel API (nodig voor env-sync job)
+#
+# Deprecated / niet meer gebruikt (INFRA-0021):
+#   FLY_API_TOKEN       — was: Fly.io deploy-token. API draait nu als Nitro op Vercel.
+#   FLY_APP_NAME        — was: hr-saas-api-demo. Niet meer relevant.
+#   CORS_ALLOWED_ORIGINS — was: Fly.io secrets. Web + API nu same-origin op Vercel.
 #
 # Zie docs/runbooks/demo-deploy.md voor eenmalige setup en troubleshooting.
 
@@ -118,73 +123,94 @@ jobs:
           PII_ENCRYPTION_KEY: ${{ secrets.PII_ENCRYPTION_KEY }}
         run: pnpm --filter=@hr-saas/db exec prisma db seed
 
-  # ─── Job 3: deploy-api ────────────────────────────────────────────────────
-  # Bouwt en deployt de Fastify-container naar Fly.io (Amsterdam).
-  # --remote-only: Fly bouwt de image in de cloud, geen lokale Docker nodig.
-  deploy-api:
-    name: Deploy API naar Fly.io
+  # ─── Job 3: vercel-env-sync ───────────────────────────────────────────────
+  # Synchroniseert Vercel production + preview env-vars vanuit GitHub secrets.
+  # Werkt idempotent: bestaande vars worden via PATCH bijgewerkt, ontbrekende
+  # via POST aangemaakt. Draait vóór deploy-web zodat Nitro de juiste waarden
+  # heeft bij de build.
+  #
+  # Achtergrond (INFRA-0021): API draait niet meer op Fly.io maar als Nuxt Nitro
+  # server-routes op Vercel. JWT_SECRET, COOKIE_SECRET, PII_ENCRYPTION_KEY,
+  # DATABASE_URL en DIRECT_URL moeten daarom op Vercel beschikbaar zijn.
+  vercel-env-sync:
+    name: Sync env-vars naar Vercel
     runs-on: ubuntu-latest
     environment: demo
     needs: [seed]
     steps:
-      - uses: actions/checkout@v4
-
-      # setup-flyctl@master is onstabiel. Handmatige install via officieel install-script
-      # is betrouwbaarder en garandeert altijd de laatste stabiele flyctl.
-      - name: Install flyctl
-        run: curl -L https://fly.io/install.sh | sh
-
-      - name: Flyctl aan PATH toevoegen
-        run: echo "$HOME/.fly/bin" >> $GITHUB_PATH
-
-      - name: Fly secrets synchroniseren
-        # Zet secrets alleen als ze (nog) niet correct staan.
-        # `fly secrets set` is idempotent: ongewijzigde waarden triggeren geen deploy.
-        # JWT_SECRET en COOKIE_SECRET worden bij elke deploy opnieuw gesynchroniseerd
-        # zodat rotaties in GitHub Secrets automatisch doorwerken op Fly.
+      - name: Sync env-vars via Vercel API
+        # Gebruik upsert-patroon: probeer POST, bij conflict (409) haal ID op en PATCH.
+        # Targets: production + preview (development wordt lokaal via .env beheerd).
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
-          fly secrets set \
-            DATABASE_URL="${{ secrets.NEON_DATABASE_URL }}" \
-            DIRECT_URL="${{ secrets.NEON_DIRECT_URL }}" \
-            PII_ENCRYPTION_KEY="${{ secrets.PII_ENCRYPTION_KEY }}" \
-            JWT_SECRET="${{ secrets.JWT_SECRET }}" \
-            COOKIE_SECRET="${{ secrets.COOKIE_SECRET }}" \
-            CORS_ALLOWED_ORIGINS="https://app.larsvdloo.com" \
-            --app hr-saas-api-demo \
-            --stage
+          set -euo pipefail
 
-      - name: Deploy naar Fly.io
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          flyctl deploy \
-            --remote-only \
-            --config apps/api/fly.toml \
-            --app hr-saas-api-demo \
-            --wait-timeout 120
+          BASE="https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env"
+          AUTH="Authorization: Bearer ${VERCEL_TOKEN}"
+          QUERY="teamId=${VERCEL_TEAM_ID}"
 
-      - name: Health check API
-        run: |
-          echo "Wachten op Fly health check..."
-          sleep 15
-          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" https://hr-saas-api-demo.fly.dev/healthz || echo "000")
-          if [ "$STATUS" != "200" ]; then
-            echo "Health check mislukt — HTTP $STATUS"
-            exit 1
-          fi
-          echo "API bereikbaar — HTTP $STATUS"
+          upsert_env() {
+            local KEY="$1"
+            local VALUE="$2"
+            local PAYLOAD
+            PAYLOAD=$(printf '{"key":"%s","value":"%s","type":"encrypted","target":["production","preview"]}' "$KEY" "$VALUE")
+
+            HTTP=$(curl -s -o /tmp/vercel_resp.json -w "%{http_code}" \
+              -X POST "${BASE}?${QUERY}" \
+              -H "$AUTH" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD")
+
+            if [ "$HTTP" = "200" ] || [ "$HTTP" = "201" ]; then
+              echo "  [OK] $KEY aangemaakt"
+            elif [ "$HTTP" = "409" ]; then
+              ENV_ID=$(curl -s "${BASE}?${QUERY}" \
+                -H "$AUTH" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          envs = data.get('envs', [])
+          for e in envs:
+              if e.get('key') == '$KEY':
+                  print(e['id'])
+                  break
+          ")
+              if [ -z "$ENV_ID" ]; then
+                echo "  [FOUT] $KEY: 409 maar ID niet gevonden" >&2
+                exit 1
+              fi
+              PATCH_PAYLOAD=$(printf '{"value":"%s","type":"encrypted","target":["production","preview"]}' "$VALUE")
+              HTTP2=$(curl -s -o /dev/null -w "%{http_code}" \
+                -X PATCH "${BASE}/${ENV_ID}?${QUERY}" \
+                -H "$AUTH" \
+                -H "Content-Type: application/json" \
+                -d "$PATCH_PAYLOAD")
+              echo "  [PATCH $HTTP2] $KEY bijgewerkt"
+            else
+              echo "  [FOUT] $KEY: HTTP $HTTP" >&2
+              cat /tmp/vercel_resp.json >&2
+              exit 1
+            fi
+          }
+
+          echo "Vercel env-vars synchroniseren..."
+          upsert_env "JWT_SECRET"         "${{ secrets.JWT_SECRET }}"
+          upsert_env "COOKIE_SECRET"      "${{ secrets.COOKIE_SECRET }}"
+          upsert_env "PII_ENCRYPTION_KEY" "${{ secrets.PII_ENCRYPTION_KEY }}"
+          upsert_env "DATABASE_URL"       "${{ secrets.NEON_DATABASE_URL }}"
+          upsert_env "DIRECT_URL"         "${{ secrets.NEON_DIRECT_URL }}"
+          echo "Sync klaar."
 
   # ─── Job 4: deploy-web ────────────────────────────────────────────────────
-  # Deployt de Nuxt-app naar Vercel.
-  # Parallel met deploy-api — web heeft geen directe DB-afhankelijkheid.
-  # Wacht op seed: E2E na deploy vereist aanwezige testdata.
+  # Deployt de Nuxt-app (inclusief Nitro server-routes = API) naar Vercel.
+  # Wacht op vercel-env-sync zodat de juiste env-vars aanwezig zijn bij de build.
   deploy-web:
     name: Deploy web naar Vercel
     runs-on: ubuntu-latest
     environment: demo
-    needs: [seed]
+    needs: [vercel-env-sync]
     steps:
       - uses: actions/checkout@v4
 
@@ -217,8 +243,7 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          # NUXT_PUBLIC_API_BASE en NITRO_PRESET worden door Vercel gezet vanuit
-          # de Vercel project environment variables (niet via CI-secrets).
+          # NITRO_PRESET en NUXT_PUBLIC_API_BASE komen uit Vercel project env-vars.
           # Zie runbook sectie "Eenmalige setup — Vercel".
         run: |
           vercel build --prod \
@@ -238,11 +263,7 @@ jobs:
           echo "Wachten op Vercel propagatie..."
           sleep 15
           # curl zonder -f zodat we de HTTP-statuscode altijd krijgen, ook bij 4xx.
-          # Alleen 5xx en curl-fouten (000) zijn een harde fout:
-          # - 2xx: OK
-          # - 3xx: redirect (login-wall verwacht op /)
-          # - 4xx: app reageert, auth werkt — acceptabel voor health check
-          # - 5xx / 000: server kapot of DNS niet bereikbaar — fail
+          # Alleen 5xx en curl-fouten (000) zijn een harde fout.
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://app.larsvdloo.com || echo "000")
           echo "Web health check HTTP $STATUS"
           if [ "$STATUS" = "000" ] || [ "${STATUS:0:1}" = "5" ]; then
@@ -252,33 +273,29 @@ jobs:
           echo "Web bereikbaar — HTTP $STATUS"
 
   # ─── Job 5: smoke-test ────────────────────────────────────────────────────
-  # Minimale rook-test na beide deploys: verifieer dat API en web bereikbaar zijn
-  # en dat de CORS-headers correct zijn (web mag API aanroepen).
+  # Minimale rook-test na deploy: verifieer dat web en de Nitro API-route bereikbaar
+  # zijn. Fly.io is verwijderd (INFRA-0021) — API draait nu via Nuxt Nitro op Vercel.
   smoke-test:
     name: Smoke tests na deploy
     runs-on: ubuntu-latest
-    needs: [deploy-api, deploy-web]
+    needs: [deploy-web]
     steps:
-      - name: API /healthz
-        run: |
-          curl -sf https://hr-saas-api-demo.fly.dev/healthz | grep -q '"status":"ok"'
-          echo "API healthz OK"
-
-      - name: API CORS op custom domein
-        run: |
-          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
-            -H "Origin: https://app.larsvdloo.com" \
-            https://api.larsvdloo.com/healthz || echo "000")
-          echo "API custom domein HTTP $STATUS"
-          # 200 of 204 zijn beide acceptabel afhankelijk van CORS preflight
-          [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ]
-
       - name: Web bereikbaar
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://app.larsvdloo.com || echo "000")
           echo "Web HTTP $STATUS"
           # Accepteer 2xx/3xx/4xx — alleen 5xx en curl-fouten (000) zijn echt kapot.
           [ "$STATUS" != "000" ] && [ "${STATUS:0:1}" != "5" ]
+
+      - name: API /api/v1/healthz via Nitro
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://app.larsvdloo.com/api/v1/healthz || echo "000")
+          echo "API healthz HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "API health check mislukt — HTTP $STATUS"
+            exit 1
+          fi
+          echo "API healthz OK"
 
       - name: Deploy-log wegschrijven
         if: always()
@@ -292,17 +309,12 @@ jobs:
   # Runt ALLEEN na smoke-tests zodat een kapotte deploy nooit E2E triggert.
   # Vereiste secrets: geen extra (gebruikt publieke staging-URL).
   # Vereiste seed-data: acme-tenant + testgebruikers — zie docs/runbooks/seed-data.md.
-  #
-  # Activeer pas nadat backend AUTH-0001 t/m AUTH-0004 en frontend AUTH-0006 + AUTH-0007
-  # gedeployed zijn (dag 6+ sprint 2). Tot die tijd: job runt maar specs die backend
-  # vereisen zijn gemarkeerd met `test.skip` en zullen als "pending" getoond worden.
   e2e:
     name: E2E Playwright (staging)
     runs-on: ubuntu-latest
     needs: [smoke-test]
     env:
       E2E_BASE_URL: https://app.larsvdloo.com
-      E2E_API_BASE_URL: https://api.larsvdloo.com
     steps:
       - uses: actions/checkout@v4
 

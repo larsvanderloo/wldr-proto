@@ -1,27 +1,34 @@
-# Runbook: Demo-deploy pipeline (Fly.io + Vercel + Neon)
+# Runbook: Demo-deploy pipeline (Vercel + Neon)
 
 - **Alert**: n.v.t. — dit is een setup- en operationeel runbook.
 - **Pipeline**: `.github/workflows/deploy-demo.yml`
 - **Eigenaar**: devops-qa
-- **Bijgewerkt**: 2026-04-21
+- **Bijgewerkt**: 2026-04-22
 - **Gerelateerde ADR**: ADR-0004 (demo-hosting), ADR-0005 (Neon dual-URL)
+- **Wijziging**: INFRA-0021 — Fly.io verwijderd; API draait nu als Nuxt Nitro server-routes op Vercel.
 
 ---
 
 ## Overzicht
 
 ```
-GitHub main → [migrate] → [deploy-api] parallel [deploy-web] → [smoke-test]
-                 |               |                    |
-              Neon DB        Fly.io ams           Vercel edge
-         (prisma migrate)  (hr-saas-api-demo)  (app.larsvdloo.com)
+GitHub main → [migrate] → [seed] → [vercel-env-sync] → [deploy-web] → [smoke-test] → [e2e]
+                 |                          |                  |
+              Neon DB               Vercel env API        Vercel edge
+         (prisma migrate)       (JWT, DB creds, PII)   (app.larsvdloo.com)
+                                                         incl. Nitro API
 ```
 
 Domeinen:
-- Web: `app.larsvdloo.com` — CNAME naar Vercel
-- API: `api.larsvdloo.com` — CNAME naar `hr-saas-api-demo.fly.dev`
+- Web + API: `app.larsvdloo.com` — CNAME naar Vercel (Nuxt Nitro SSR + server-routes)
 
 DNS-provider: Vercel (domein `larsvdloo.com` staat in Vercel).
+
+**Architectuurwijziging INFRA-0021:** De Fastify-container op Fly.io is uit de pipeline verwijderd.
+Alle API-logica draait nu als Nuxt Nitro server-routes op Vercel (`/api/v1/*`).
+De smoke-test controleert `/api/v1/healthz` relatief via `app.larsvdloo.com`.
+`api.larsvdloo.com` (CNAME naar Fly) blijft bestaan tot E2E groen is op de nieuwe stack
+en INFRA-0022 de DNS-opruiming doet.
 
 ---
 
@@ -47,39 +54,11 @@ DNS-provider: Vercel (domein `larsvdloo.com` staat in Vercel).
    Let op: zonder `-pooler` in de hostnaam.
 
 **Toelichting query-parameters:**
-- `sslmode=require` — verplicht bij Neon, ook vanuit Fly.io.
+- `sslmode=require` — verplicht bij Neon.
 - `pgbouncer=true` — schakelt Prisma's prepared statements uit (PgBouncer-compatibel).
 - `connect_timeout=10` — voorkomt eindeloze verbindingspogingen bij cold-start.
 
-### 1.2 Fly.io — API
-
-```bash
-# Installeer flyctl
-brew install flyctl
-
-# Maak account en log in
-fly auth signup   # of: fly auth login (bij bestaand account)
-
-# Verifieer login
-fly auth whoami
-
-# Maak de app aan (zonder te deployen — CI doet de eerste deploy)
-# Voer dit uit vanuit de repo-root:
-fly launch \
-  --no-deploy \
-  --config apps/api/fly.toml \
-  --name hr-saas-api-demo \
-  --region ams \
-  --org personal
-
-# Genereer een deploy-token (beperkt: alleen deploy, geen account-rechten)
-fly tokens create deploy -a hr-saas-api-demo
-# Kopieer de output — dit is FLY_API_TOKEN
-```
-
-**Controleer:** `fly status -a hr-saas-api-demo` toont de app als `suspended` (nog niet deployed).
-
-### 1.3 Vercel — web
+### 1.2 Vercel — web + API (Nitro)
 
 ```bash
 # Optie A: via CLI (aanbevolen voor eerste setup)
@@ -98,21 +77,32 @@ cat apps/web/.vercel/project.json
 # {"orgId":"<VERCEL_ORG_ID>","projectId":"<VERCEL_PROJECT_ID>"}
 ```
 
-**Vercel project environment variables instellen** (via dashboard of CLI):
+**Vercel project environment variables instellen** (eenmalig via CLI of dashboard):
 
 ```bash
 # Productie-omgevingsvariabelen op Vercel zetten:
 vercel env add NUXT_PUBLIC_API_BASE production
-# Waarde: https://api.larsvdloo.com
+# Waarde: /api/v1  (relatief — Nitro route, geen externe API-URL meer)
 
 vercel env add NITRO_PRESET production
 # Waarde: vercel
 ```
 
+De overige vars (JWT_SECRET, COOKIE_SECRET, PII_ENCRYPTION_KEY, DATABASE_URL, DIRECT_URL)
+worden automatisch gesynchroniseerd door de `vercel-env-sync` job bij elke pipeline-run.
+
 **Vercel token genereren:**
 1. Ga naar [vercel.com/account/tokens](https://vercel.com/account/tokens).
 2. Maak een token aan met naam `hr-saas-github-actions`.
 3. Kopieer de token — dit is `VERCEL_TOKEN`.
+
+**Vercel team-ID ophalen:**
+```bash
+curl -s "https://api.vercel.com/v2/teams" \
+  -H "Authorization: Bearer <VERCEL_TOKEN>" \
+  | python3 -m json.tool | grep -E '"id"|"slug"'
+# Kopieer het team-ID — dit is VERCEL_TEAM_ID
+```
 
 **Optie B: GitHub-integratie**
 Als je Vercel GitHub-integratie gebruikt (Vercel-app geinstalleerd op de repo), zijn
@@ -121,13 +111,30 @@ In dat geval: verwijder de `deploy-web` job uit `deploy-demo.yml` en vertrouw op
 de Vercel-integratie. Nadeel: minder controle over deploy-volgorde t.o.v. migrate.
 Aanbeveling: gebruik de CLI-methode zodat `migrate` altijd vóór `deploy-web` klaar is.
 
-### 1.4 PII-encryptiesleutel genereren
+### 1.3 PII-encryptiesleutel genereren
 
 ```bash
 # Genereer een sterke 32-byte hex key. NOOIT de dev-key hergebruiken.
 openssl rand -hex 32
 # Kopieer de output — dit is PII_ENCRYPTION_KEY
 ```
+
+### 1.4 JWT- en session-secrets genereren
+
+```bash
+# Genereer JWT_SECRET
+openssl rand -hex 32
+# Genereer COOKIE_SECRET
+openssl rand -hex 32
+```
+
+**Rotatie-beleid:** Roteer JWT_SECRET en COOKIE_SECRET door nieuwe waarden te genereren,
+bij te werken in GitHub Secrets (`gh secret set JWT_SECRET`), en een lege commit te pushen
+zodat de `vercel-env-sync` job de waarden doorzet naar Vercel. Actieve sessies worden
+ongeldig bij rotatie — doe dit buiten kantooruren.
+
+PII_ENCRYPTION_KEY mag NIET worden geroteerd zonder een datamigratieplan — bestaande
+versleutelde velden in de DB worden onleesbaar. Rotatie is een architect-beslissing.
 
 ### 1.5 GitHub Secrets instellen
 
@@ -145,8 +152,11 @@ gh secret set NEON_DIRECT_URL
 gh secret set PII_ENCRYPTION_KEY
 # Plak de 32-byte hex string
 
-gh secret set FLY_API_TOKEN
-# Plak het Fly deploy-token
+gh secret set JWT_SECRET
+# Plak de 32-byte hex string
+
+gh secret set COOKIE_SECRET
+# Plak de 32-byte hex string
 
 gh secret set VERCEL_TOKEN
 # Plak het Vercel token
@@ -156,12 +166,16 @@ gh secret set VERCEL_ORG_ID
 
 gh secret set VERCEL_PROJECT_ID
 # Plak de projectId uit .vercel/project.json
+
+gh secret set VERCEL_TEAM_ID
+# Plak het team-ID uit de Vercel API (zie sectie 1.2)
 ```
 
 Verifieer:
 ```bash
 gh secret list
-# Verwacht: 7 secrets zichtbaar (namen, geen waarden)
+# Verwacht: 9 secrets zichtbaar (namen, geen waarden)
+# Let op: FLY_API_TOKEN is aanwezig maar deprecated (INFRA-0021) — laat staan.
 ```
 
 ### 1.6 DNS configureren (Vercel Dashboard)
@@ -169,34 +183,49 @@ gh secret list
 DNS-provider is Vercel. Beide records worden aangemaakt in het Vercel-domeinbeheer
 voor `larsvdloo.com`.
 
-**Web — `app.larsvdloo.com`:**
+**Web + API — `app.larsvdloo.com`:**
 1. Ga naar Vercel Dashboard → Project `hr-saas-web-demo` → Settings → Domains.
 2. Voeg `app.larsvdloo.com` toe.
-3. Vercel genereert automatisch een CNAME-record in het Vercel-DNS-panel
-   (`larsvdloo.com` → beheerd door Vercel).
+3. Vercel genereert automatisch een CNAME-record in het Vercel-DNS-panel.
 4. SSL-certificaat wordt automatisch uitgerold via Vercel's ACME-integratie.
 
-**API — `api.larsvdloo.com`:**
-1. Ga naar Vercel Dashboard → Domains (op account-niveau, niet project-niveau).
-2. Voeg een DNS-record toe:
-   - Type: `CNAME`
-   - Naam: `api`
-   - Waarde: `hr-saas-api-demo.fly.dev`
-   - TTL: 3600 (of auto)
-3. Fly.io verwerkt TLS voor dit domein via ACME (Let's Encrypt).
-4. Voeg het custom domein toe aan Fly:
-   ```bash
-   fly certs add api.larsvdloo.com -a hr-saas-api-demo
-   fly certs check api.larsvdloo.com -a hr-saas-api-demo
-   # Wacht tot status: Issued
-   ```
-
-**Propagatietijd:** 5 minuten tot 48 uur, afhankelijk van DNS-cache. Vercel-DNS
-propageert doorgaans binnen 5-15 minuten.
+**Legacy API — `api.larsvdloo.com`:**
+Dit CNAME-record (naar `hr-saas-api-demo.fly.dev`) blijft bestaan totdat INFRA-0022
+is uitgevoerd. Raak het niet aan totdat E2E groen is op de nieuwe stack.
 
 ---
 
-## 2. Eerste deploy
+## 2. API draait nu via Nuxt Nitro op Vercel
+
+Vanaf INFRA-0021 draait alle API-logica als Nitro server-routes binnen de Nuxt-app op Vercel.
+
+**Wat dit betekent:**
+
+| Oud (Fly.io) | Nieuw (Vercel Nitro) |
+|---|---|
+| `https://api.larsvdloo.com/healthz` | `https://app.larsvdloo.com/api/v1/healthz` |
+| Aparte Fastify-container op Fly | Nuxt Nitro server-route in dezelfde Vercel-deployment |
+| Fly secrets (JWT, DB, PII) | Vercel env-vars (gesynchroniseerd via `vercel-env-sync` job) |
+| `CORS_ALLOWED_ORIGINS` nodig | Niet meer nodig — web en API op zelfde origin |
+
+**Nitro server-routes:** Alle routes in `apps/web/server/api/` worden automatisch
+geserveerd onder `/api/` door Nitro. De Vercel-preset compileert deze naar Vercel
+serverless functions.
+
+**Omgevingsvariabelen in Nitro:** Nitro leest env-vars uit Vercel's runtime environment.
+De `vercel-env-sync` job zorgt dat de volgende vars altijd up-to-date zijn:
+- `JWT_SECRET` — JWT signing
+- `COOKIE_SECRET` — session cookie signing
+- `PII_ENCRYPTION_KEY` — versleuteling PII-velden in DB
+- `DATABASE_URL` — pooled Neon URL voor runtime queries
+- `DIRECT_URL` — directe Neon URL voor transacties
+
+**Lokale ontwikkeling:** Maak `apps/web/.env` aan met bovenstaande vars (dev-waarden).
+Gebruik NOOIT productie-credentials lokaal.
+
+---
+
+## 3. Eerste deploy
 
 Na eenmalige setup: push naar `main` triggert de pipeline automatisch.
 
@@ -205,34 +234,28 @@ Na eenmalige setup: push naar `main` triggert de pipeline automatisch.
 gh secret list
 
 # Push (of maak een lege commit als main al up-to-date is)
-git commit --allow-empty -m "chore(ci): trigger eerste demo-deploy"
+git commit --allow-empty -m "chore(ci): trigger eerste demo-deploy na INFRA-0021"
 git push origin main
 ```
 
 **Stappen in de pipeline:**
 1. `migrate` — Prisma migrate deploy via `NEON_DIRECT_URL`. Duurt ~30s.
-2. `deploy-api` — Fly.io remote build + rolling deploy. Duurt ~3-5 min.
-3. `deploy-web` — Vercel build + prod deploy. Duurt ~2-4 min. Parallel met deploy-api.
-4. `smoke-test` — curl op beide endpoints. Duurt ~30s.
+2. `seed` — Testdata seeden. Duurt ~20s.
+3. `vercel-env-sync` — JWT/DB/PII env-vars naar Vercel pushen. Duurt ~15s.
+4. `deploy-web` — Vercel build + prod deploy (Nitro = web + API). Duurt ~2-4 min.
+5. `smoke-test` — curl op web en `/api/v1/healthz`. Duurt ~30s.
+6. `e2e` — Playwright tests tegen `app.larsvdloo.com`. Duurt ~2-5 min.
 
 **Controleer na pipeline:**
 
 ```bash
-# Neon-verbindingen
-curl -sf https://hr-saas-api-demo.fly.dev/healthz
-# Verwacht: {"status":"ok"}
-
-# Via custom domein
-curl -sf https://api.larsvdloo.com/healthz
-# Verwacht: {"status":"ok"}
-
 # Web
 curl -sf -o /dev/null -w "%{http_code}" https://app.larsvdloo.com
-# Verwacht: 200
+# Verwacht: 200 of 3xx
 
-# Fly machine-status
-fly status -a hr-saas-api-demo
-# Verwacht: 1 machine running, health check passing
+# API via Nitro
+curl -sf https://app.larsvdloo.com/api/v1/healthz
+# Verwacht: {"status":"ok"}
 
 # Neon connection count (via Neon dashboard)
 # ga naar neon.tech → project → monitoring → connections
@@ -240,9 +263,9 @@ fly status -a hr-saas-api-demo
 
 ---
 
-## 3. Troubleshooting
+## 4. Troubleshooting
 
-### 3.1 RLS werkt niet via pooler
+### 4.1 RLS werkt niet via pooler
 
 **Symptoom:** Tenant-data lekt of queries returnen lege resultaten.
 
@@ -251,10 +274,9 @@ als de sessie wordt hergebruikt. Prisma's `$executeRaw('SET LOCAL ...')` werkt a
 in een transactie.
 
 **Oplossing:** Zorg dat elke tenant-query in een `prisma.$transaction()` block zit.
-Zie `packages/db/src/client.ts` voor het RLS-context-patroon. Als je buiten een
-transactie werkt, gebruik dan de `NEON_DIRECT_URL` voor die query (development only).
+Zie `packages/db/src/client.ts` voor het RLS-context-patroon.
 
-### 3.2 Prisma migrate-fouten
+### 4.2 Prisma migrate-fouten
 
 **Symptoom:** Pipeline faalt op `prisma migrate deploy` met advisory lock error.
 
@@ -268,32 +290,58 @@ secret `NEON_DIRECT_URL` de directe URL (zonder `-pooler`) bevat.
 
 **Oplossing:**
 ```bash
-# Bekijk migratiestatus
-fly ssh console -a hr-saas-api-demo -C "cd /app && npx prisma migrate status"
-# Of lokaal met DIRECT_URL:
+# Lokaal controleren met DIRECT_URL:
 DATABASE_URL=$NEON_DIRECT_URL DIRECT_URL=$NEON_DIRECT_URL pnpm --filter=@hr-saas/db migrate:deploy
 ```
 
-### 3.3 Fly health check mislukt
+### 4.3 Nitro serverless function crasht
 
-**Symptoom:** Deploy slaagt maar health check in `/healthz` faalt. Machine crasht in loop.
+**Symptoom:** `/api/v1/healthz` geeft 500 of time-out.
 
 **Diagnose:**
+1. Controleer Vercel Function logs: Vercel Dashboard → Project → Functions → logs.
+2. Controleer of alle env-vars aanwezig zijn:
+
 ```bash
-fly logs -a hr-saas-api-demo
-fly status -a hr-saas-api-demo
+VERCEL_TOKEN='<token>'
+TEAM='<team_id>'
+PROJ='<project_id>'
+curl -s "https://api.vercel.com/v9/projects/${PROJ}/env?teamId=${TEAM}" \
+  -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+  | python3 -m json.tool | grep '"key"'
+# Verwacht: JWT_SECRET, COOKIE_SECRET, PII_ENCRYPTION_KEY, DATABASE_URL, DIRECT_URL
 ```
 
 **Veelvoorkomende oorzaken:**
 
 | Oorzaak | Oplossing |
 |---|---|
-| `DATABASE_URL` secret niet gezet | `fly secrets list -a hr-saas-api-demo` — ontbrekende secrets toevoegen |
-| App luistert niet op poort 4000 | Verifieer `PORT=4000` en `HOST=0.0.0.0` in `fly.toml` env |
-| Prisma generate niet uitgevoerd in image | Controleer Dockerfile stage 3: `npx prisma generate` |
-| Memory OOM (256 MB) | Verhoog tijdelijk: `fly scale memory 512 -a hr-saas-api-demo` |
+| Env-var ontbreekt op Vercel | Voer `vercel-env-sync` job handmatig uit (push lege commit) |
+| `NITRO_PRESET` niet `vercel` | Vercel Dashboard → Environment Variables → check NITRO_PRESET |
+| Prisma client niet gegenereerd | Controleer `postinstall` script in `package.json` van `@hr-saas/db` |
+| Cold-start DB-timeout | Verhoog `connect_timeout` in Neon URL naar 30; overweeg connection pooling |
 
-### 3.4 Vercel build-cache stale
+### 4.4 vercel-env-sync job mislukt
+
+**Symptoom:** Job faalt met HTTP 4xx of onbekende fout.
+
+**Diagnose:**
+```bash
+# Test Vercel API-toegang handmatig:
+curl -s "https://api.vercel.com/v9/projects/${VERCEL_PROJECT_ID}/env?teamId=${VERCEL_TEAM_ID}" \
+  -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+  | python3 -m json.tool | head -20
+```
+
+**Veelvoorkomende oorzaken:**
+
+| Oorzaak | Oplossing |
+|---|---|
+| `VERCEL_TEAM_ID` niet gezet als GH secret | `gh secret set VERCEL_TEAM_ID` |
+| Token verlopen | Genereer nieuw token op vercel.com/account/tokens |
+| Project-ID onjuist | Controleer `.vercel/project.json` in `apps/web/` |
+
+### 4.5 Vercel build-cache stale
 
 **Symptoom:** Wijzigingen in `packages/contracts` verschijnen niet in de web-build.
 
@@ -304,63 +352,36 @@ vercel --prod --force --token=$VERCEL_TOKEN
 # Of via dashboard: Deployments → Redeploy → zonder cache
 ```
 
-**Structurele oplossing:** Voeg een cache-key toe gebaseerd op `packages/contracts`
-hash als dit vaker optreedt. Bespreek met devops-qa.
+### 4.6 DNS-propagatie
 
-### 3.5 DNS-propagatie
-
-**Symptoom:** `api.larsvdloo.com` of `app.larsvdloo.com` niet bereikbaar.
+**Symptoom:** `app.larsvdloo.com` niet bereikbaar.
 
 **Diagnose:**
 ```bash
-# Check DNS-propagatie
-dig CNAME api.larsvdloo.com +short
-# Verwacht: hr-saas-api-demo.fly.dev
-
 dig CNAME app.larsvdloo.com +short
 # Verwacht: cname.vercel-dns.com of vergelijkbaar Vercel-target
 
-# Alternatief: gebruik externe DNS-checker
-curl "https://dns.google/resolve?name=api.larsvdloo.com&type=CNAME"
+curl "https://dns.google/resolve?name=app.larsvdloo.com&type=CNAME"
 ```
 
 **Propagatietijd:** 5 minuten (Vercel-DNS) tot 48 uur (externe resolvers met hoge TTL).
-Controleer TTL van bestaande records — verlaag naar 300s vóór wijzigingen.
-
-**Fly TLS-certificaat:**
-```bash
-fly certs check api.larsvdloo.com -a hr-saas-api-demo
-# Status moet "Issued" zijn; "Awaiting" = DNS propageert nog
-```
 
 ---
 
-## 4. Rollback
+## 5. Rollback
 
-### 4.1 API-rollback (Fly.io)
-
-```bash
-# Bekijk release-history
-fly releases -a hr-saas-api-demo
-
-# Rollback naar vorige image
-fly deploy --image <vorige-image-ref> -a hr-saas-api-demo
-# image-ref staat in de output van fly releases, bv: registry.fly.io/hr-saas-api-demo:deployment-xyz
-```
-
-**Automatische rollback:** De workflow heeft geen automatische rollback (demo-fase).
-Bij een falende health check in de `deploy-api` job stopt de pipeline; de vorige
-machine draait nog. Fly's rolling-strategie zorgt dat de oude instantie actief blijft
-totdat de nieuwe gezond is.
-
-### 4.2 Web-rollback (Vercel)
+### 5.1 Web-rollback (Vercel)
 
 1. Ga naar Vercel Dashboard → Project `hr-saas-web-demo` → Deployments.
 2. Zoek de vorige succesvolle deployment.
 3. Klik op `...` → **Promote to Production**.
 4. Vercel routeert traffic onmiddellijk naar de vorige build.
 
-### 4.3 Database-rollback (migraties)
+**Automatische rollback:** De workflow heeft geen automatische rollback (demo-fase).
+Bij een falende health check stopt de pipeline. De vorige Vercel-deployment blijft
+actief totdat je handmatig promoot.
+
+### 5.2 Database-rollback (migraties)
 
 **Belangrijk:** Prisma heeft geen ingebouwde rollback voor `migrate deploy`.
 Migraties moeten backward-compatible zijn (expand-deploy-contract patroon — zie CLAUDE.md).
@@ -369,10 +390,9 @@ Bij een problematische migratie:
 ```bash
 # Optie 1: nieuwe migratie die de wijziging ongedaan maakt
 pnpm --filter=@hr-saas/db migrate:dev --name revert_<problematische_migratie>
-# Schrijf de inverse SQL in de gegenereerde migratiebestand
+# Schrijf de inverse SQL in het gegenereerde migratiebestand
 
 # Optie 2: Neon branching (aanbevolen voor destructieve wijzigingen)
-# Neon ondersteunt database-branches. Maak een branch vóór migrate:
 # neon.tech → project → branches → Create branch
 # Herstel data via de branch als de migratie data beschadigt.
 ```
@@ -383,19 +403,17 @@ Dit is een noodmaatregel — data na het herstelmoment gaat verloren.
 
 ---
 
-## 5. Monitoring na deploy
+## 6. Monitoring na deploy
 
 Na elke deploy: monitor minimaal 15 minuten.
 
 ```bash
-# Fly-logs streamen
-fly logs -a hr-saas-api-demo
+# API via Nitro
+watch -n 10 'curl -s https://app.larsvdloo.com/api/v1/healthz'
 
-# Fly machine-status
-watch -n 5 'fly status -a hr-saas-api-demo'
-
-# API error-rate controleren
-# (Datadog/Grafana: RED-dashboard per service)
+# Vercel Function logs (real-time)
+vercel logs --prod --token=$VERCEL_TOKEN
+# Of via Vercel Dashboard → Project → Functions
 
 # Neon connection pool-bezetting
 # Neon Dashboard → Monitoring → Connections
@@ -403,6 +421,42 @@ watch -n 5 'fly status -a hr-saas-api-demo'
 ```
 
 **Wanneer escaleren:**
-- API health check faalt na deploy: directe rollback (zie sectie 4).
+- `/api/v1/healthz` faalt na deploy: directe rollback (zie sectie 5).
 - Error-rate boven 1% in 5 minuten: escaleer naar backend-eigenaar.
 - Neon connections > 80% van max: schakel pooler-instellingen aan; bespreek met architect.
+
+---
+
+## 7. Deprecated / ongebruikte GitHub secrets (INFRA-0021)
+
+De volgende secrets zijn aanwezig in de repo maar worden niet meer gebruikt als
+Fly.io-specifieke configuratie na INFRA-0021. Ze worden NIET verwijderd zodat een
+rollback naar Fly.io mogelijk blijft totdat de pivot als stable is aangemerkt.
+Opruiming is gepland in INFRA-0024.
+
+| Secret | Status | Toelichting |
+|---|---|---|
+| `FLY_API_TOKEN` | Deprecated (rollback-behoud) | Was Fly.io deploy-token. Fly.io trial verlopen. Bewaard voor rollback. |
+| `JWT_SECRET` | Actief op Vercel via vercel-env-sync | Was Fly.io secret. Wordt nu via `vercel-env-sync` job gesynchroniseerd naar Vercel. Blijft gezet in GH Secrets — dubbel gebruik is intentioneel tijdens transitie. |
+| `COOKIE_SECRET` | Actief op Vercel via vercel-env-sync | Was Fly.io secret. Zelfde situatie als `JWT_SECRET`. Blijft gezet voor rollback-mogelijkheid. |
+| `CORS_ALLOWED_ORIGINS` | Niet meer nodig | Was Fly secrets set. Web + API nu same-origin op Vercel — CORS niet meer relevant. |
+
+**Rollback-procedure (Fly.io):**
+Als de Vercel/Nitro-pivot mislukt en rollback naar Fly.io nodig is:
+1. Herstel de `deploy-api` en `health-check API` jobs uit git-history (`git show <vorige-sha>:.github/workflows/deploy-demo.yml`).
+2. `FLY_API_TOKEN`, `JWT_SECRET` en `COOKIE_SECRET` zijn nog aanwezig als GH secrets — geen herinstelling nodig.
+3. Verwijder de `vercel-env-sync` dependency op `JWT_SECRET` en `COOKIE_SECRET` (die gaan dan weer via Fly).
+4. Push naar `main` — pipeline hervat Fly-deploy.
+
+**Opruiming (INFRA-0024):**
+Verwijder `FLY_API_TOKEN` en `CORS_ALLOWED_ORIGINS` uit GH Secrets zodra:
+- E2E groen op Vercel/Nitro-stack gedurende minimaal 2 sprints.
+- INFRA-0022 (DNS-opruiming `api.larsvdloo.com`) is afgerond.
+- Architect heeft bevestigd dat productie-pipeline (AWS ECS) geen Fly.io overlap heeft.
+
+```bash
+# Opruiming in INFRA-0024 (NIET nu uitvoeren):
+gh secret delete FLY_API_TOKEN
+gh secret delete CORS_ALLOWED_ORIGINS
+# JWT_SECRET en COOKIE_SECRET blijven — die zijn actief op Vercel.
+```
