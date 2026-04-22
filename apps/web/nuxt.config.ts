@@ -26,6 +26,12 @@ export default defineNuxtConfig({
     preset: process.env.NITRO_PRESET ?? 'node-server',
   },
 
+  // Workspace-packages transpileren — Vite/Rollup heeft anders moeite met
+  // pnpm-symlinks + ESM subpath-exports (@hr-saas/contracts/auth etc.).
+  build: {
+    transpile: ['@hr-saas/contracts', '@hr-saas/db'],
+  },
+
   i18n: {
     defaultLocale: 'nl-NL',
     strategy: 'no_prefix',
