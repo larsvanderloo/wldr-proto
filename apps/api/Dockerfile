@@ -4,16 +4,12 @@
 # zodat de pnpm virtual-store symlinkstructuur niet in de runtime-image belandt.
 
 # ─── Stage 1: deps ──────────────────────────────────────────────────────────
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 
 # pnpm via corepack — versie uit package.json engines.
 ENV PNPM_VERSION=9.12.0
 RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
-
-# Build-tools voor native modules (cpu-features via ssh2 → testcontainers devDep).
-# Verwijderd na install om image-groei te beperken.
-RUN apk add --no-cache --virtual .build-deps python3 make g++ linux-headers
 
 # Kopieer workspace-manifests voor optimale cache-laag.
 # Wijzigingen in broncode invalideren deze laag niet.
@@ -26,7 +22,7 @@ COPY packages/db/package.json ./packages/db/
 # HUSKY=0: voorkomt dat prepare-script faalt (husky niet aanwezig in container).
 # --frozen-lockfile: expliciete lock-controle, nooit stil upgraden.
 ENV HUSKY=0
-RUN pnpm install --frozen-lockfile && apk del .build-deps
+RUN pnpm install --frozen-lockfile
 
 # ─── Stage 2: build ─────────────────────────────────────────────────────────
 FROM deps AS builder
@@ -52,6 +48,7 @@ RUN pnpm --filter=@hr-saas/api build
 # Bundel de api + productie-deps + workspace-deps in één self-contained directory.
 # pnpm deploy lost de volledige virtuele-store structuur op en schrijft echte
 # node_modules (zonder symlinks naar de centrale store) naar /tmp/api-deploy.
+# --prod garandeert dat testcontainers/supertest/cpu-features worden uitgesloten.
 RUN pnpm --filter=@hr-saas/api deploy --prod /tmp/api-deploy
 
 # Kopieer Prisma-schema in de deploy-dir zodat migrate deploy werkt bij runtime.
@@ -59,12 +56,16 @@ RUN cp -r packages/db/prisma /tmp/api-deploy/prisma
 
 # ─── Stage 3: runtime ───────────────────────────────────────────────────────
 # Geen tweede pnpm install nodig — /tmp/api-deploy is volledig self-contained.
-FROM node:20-alpine AS runtime
+FROM node:24-alpine AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=4000
 ENV HOST=0.0.0.0
+
+# OpenSSL runtime-bibliotheek — vereist door Prisma op Alpine/musl.
+# Zonder dit logt Prisma een waarschuwing over ontbrekende SSL-binaries.
+RUN apk add --no-cache openssl
 
 # Non-root user voor minimale aanvalsvlakte.
 RUN addgroup --system --gid 1001 nodejs && \
