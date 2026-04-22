@@ -177,3 +177,32 @@ Set-Cookie: hr_csrf=<token>; Secure; SameSite=Lax;
 - `cookieDomain()`-helper in `apps/api/src/modules/auth/controller.ts` is overbodig in de Nitro-versie en wordt niet overgenomen in `apps/web/server/utils/cookies.ts`.
 
 **Status**: dit addendum vervangt §1 cookie-shape en §"`Domain=.larsvdloo.com`"-bullet onder Negatief / trade-offs. De rest van ADR-0006 (split-token, CSRF double-submit, tenant-detectie, users↔employees) blijft onveranderd geldig.
+
+## Addendum 2026-04-22 rev. 2 — cookie Path verbreed naar `/` (Sprint 2.5, SSR fix)
+
+**Aanleiding**: SSR-middleware (`auth.global`) deed `POST /api/v1/auth/refresh` via `$fetch` tijdens de eerste server-render. De cookies `hr_refresh` en `hr_csrf` hadden `Path=/api/v1/auth`, waardoor de browser ze alleen meestuurt op requests naar dat specifieke path. Op SSR bestaat er geen browser — Nuxt's `$fetch` pakt inkomende request-headers niet automatisch op. Resultaat: `getCookie(event, 'hr_refresh')` retourneert `undefined` → refresh faalt → middleware bouncet authenticated users terug naar `/login`.
+
+**Wijziging**:
+
+- `COOKIE_PATH` in `apps/web/server/utils/cookies.ts` van `/api/v1/auth` naar `/`.
+- `refresh()` in `apps/web/app/stores/auth.ts` stuurt op SSR (`import.meta.server`) de inkomende request-cookies expliciet door via `useRequestHeaders(['cookie'])`.
+
+**Nieuwe Set-Cookie-shape** (vervangt het voorbeeld in Addendum 2026-04-22):
+
+```
+Set-Cookie: hr_refresh=<token>; HttpOnly; Secure; SameSite=Lax;
+            Path=/; Max-Age=604800
+Set-Cookie: hr_csrf=<token>; Secure; SameSite=Lax;
+            Path=/; Max-Age=604800
+```
+
+**Veiligheidsanalyse `Path=/`**:
+
+- `Path=/api/v1/auth` was primair bedoeld om cookie-exposure te beperken. In de same-origin Nitro-architectuur (ADR-0007) zijn alle routes onder dezelfde origin — er is geen andere Nitro-route die de cookies misbruikt. De httpOnly + SameSite=Lax + double-submit CSRF bescherming blijft de primaire beveiliging.
+- `hr_refresh` is httpOnly: JS-code (inclusief XSS) kan hem niet uitlezen ongeacht het path.
+- `hr_csrf` is niet-httpOnly (frontend leest hem voor de `X-CSRF-Token` header), maar is waardeloos zonder het bijbehorende `hr_refresh` cookie. Een aanvaller die de CSRF-waarde kent maar geen geldig refresh-token heeft, krijgt 401.
+- Risico-oordeel: verwaarloosbaar extra oppervlak tegenover het aanzienlijke voordeel van werkende SSR-auth.
+
+**Migratie-impact**: Bestaande sessies met `Path=/api/v1/auth` cookies verlopen binnen 7 dagen. Geen forced logout nodig — de browser stuurt beide varianten (nieuw path=/ en oud path=/api/v1/auth) mee bij navigatie naar `/api/v1/auth`-paden tot de oude cookies verlopen.
+
+**Status**: dit addendum rev. 2 vervangt de `Path`-waarde uit Addendum 2026-04-22. Alle overige bepalingen blijven ongewijzigd.

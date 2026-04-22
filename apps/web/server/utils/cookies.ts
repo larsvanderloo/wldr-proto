@@ -1,8 +1,11 @@
 /**
- * Cookie-helpers voor auth — conform ADR-0006 addendum 2026-04-22.
+ * Cookie-helpers voor auth — conform ADR-0006 addendum 2026-04-22 (rev. 2).
  *
  * Geen `Domain`-attribuut (same-origin, ADR-0007 V4).
- * `Path=/api/v1/auth` (Nitro-prefix vs Fastify's `/v1/auth`).
+ * `Path=/` (was `/api/v1/auth`): verbreed zodat:
+ *   1. de browser cookies meestuurt op alle paden (inclusief /employees, etc.)
+ *   2. SSR-side $fetch naar /api/v1/auth/refresh de cookies in de inkomende
+ *      request-headers aantreft wanneer useRequestHeaders(['cookie']) wordt gebruikt.
  * `Secure` alleen in productie. `SameSite=Lax` altijd.
  */
 
@@ -10,7 +13,7 @@ import { type H3Event, setCookie, deleteCookie } from 'h3'
 
 export const REFRESH_COOKIE = 'hr_refresh'
 export const CSRF_COOKIE = 'hr_csrf'
-export const COOKIE_PATH = '/api/v1/auth'
+export const COOKIE_PATH = '/'
 
 const SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60
 

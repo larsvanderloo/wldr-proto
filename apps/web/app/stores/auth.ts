@@ -103,16 +103,28 @@ export const useAuthStore = defineStore('auth', {
      * Stille refresh — wordt aangeroepen bij app-start (F4 middleware) en
      * transparant bij 401 token_expired (F2 useApi interceptor).
      * Geeft `true` bij succes, `false` als de cookie ontbreekt/verlopen is.
+     *
+     * SSR: $fetch pakt inkomende browser-cookies niet automatisch op.
+     * useRequestHeaders(['cookie']) stuurt de originele request-cookies door
+     * naar de Nitro-route zodat getCookie(event, 'hr_refresh') werkt.
+     * Client-side blijft credentials:'include' de browser-cookies meesturen.
      */
     async refresh(): Promise<boolean> {
       try {
         const csrfToken = getCsrfToken()
+        // Op SSR de inkomende request-cookies doorsturen; op client undefined (browser doet het zelf)
+        const ssrHeaders = import.meta.server
+          ? useRequestHeaders(['cookie'])
+          : undefined
         const data = await $fetch<{ access_token: string; expires_in: number; token_type: 'Bearer' }>(
           `${getApiBase()}/auth/refresh`,
           {
             method: 'POST',
             credentials: 'include',
-            headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : {},
+            headers: {
+              ...ssrHeaders,
+              ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+            },
           },
         )
         this._setToken(data.access_token, data.expires_in)
