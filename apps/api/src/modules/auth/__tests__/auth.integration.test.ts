@@ -8,52 +8,85 @@
  *  - Refresh: 200 token-rotatie, 401 csrf_mismatch, 401 refresh_revoked
  *  - Logout: 204 + cookies cleared
  *  - Protected routes: 401 zonder JWT
+ *
+ * CI-aanpak: seed wordt programmatisch uitgevoerd in beforeAll — geen externe
+ * `prisma db seed` of persistent lokale DB vereist. Idempotent via ON CONFLICT.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { buildTestApp } from '../../../test-helpers/app-factory.js'
+import { seedTestDatabase, TEST_HR_ADMIN_EMAIL, TEST_EMPLOYEE_EMAIL, TEST_PLAIN_PASSWORD } from '../../../test-helpers/seed-test-db.js'
 import { _resetAllBuckets } from '../rate-limit.js'
+import { PrismaClient } from '@hr-saas/db'
 import type { FastifyInstance } from 'fastify'
 
-// Seed-data (zie packages/db/prisma/seed.ts)
-const _TENANT_ID = '00000000-0000-0000-0000-000000000001'
-const HR_ADMIN_EMAIL = 'hr_admin@acme.test'
-const HR_ADMIN_PASSWORD = 'Welkom01!Welkom'
-const EMPLOYEE_EMAIL = 'employee@acme.test'
+// Aliassen voor leesbaarheid in tests
+const HR_ADMIN_EMAIL = TEST_HR_ADMIN_EMAIL
+const HR_ADMIN_PASSWORD = TEST_PLAIN_PASSWORD
+const EMPLOYEE_EMAIL = TEST_EMPLOYEE_EMAIL
 
 let app: FastifyInstance
+let prisma: PrismaClient
+
+/**
+ * Normaliseer set-cookie header — Fastify geeft string bij 1 cookie, string[]
+ * bij meerdere. parseCookies verwacht altijd een array.
+ */
+function normalizeCookieHeader(raw: string | string[] | undefined): string[] {
+  if (!raw) return []
+  return Array.isArray(raw) ? raw : [raw]
+}
+
+/**
+ * Parseer cookies uit een set-cookie header-array naar een key-value map.
+ */
+function parseCookies(setCookieHeaders: string | string[] | undefined): Record<string, string> {
+  const cookies: Record<string, string> = {}
+  for (const header of normalizeCookieHeader(setCookieHeaders)) {
+    const [pair] = header.split(';')
+    if (!pair) continue
+    const eqIdx = pair.indexOf('=')
+    if (eqIdx === -1) continue
+    const name = pair.slice(0, eqIdx).trim()
+    const value = pair.slice(eqIdx + 1).trim()
+    if (name) cookies[name] = value
+  }
+  return cookies
+}
 
 beforeAll(async () => {
-  // Stel omgevingsvariabelen in vóór buildApp
-  process.env.DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://hrsaas:hrsaas@localhost:5432/hrsaas'
-  process.env.DIRECT_URL = process.env.DIRECT_URL ?? 'postgresql://hrsaas:hrsaas@localhost:5432/hrsaas'
+  // Omgevingsvariabelen instellen vóór buildApp — volgorde is kritisch.
+  process.env.DATABASE_URL =
+    process.env.DATABASE_URL ?? 'postgresql://hrsaas:hrsaas@localhost:5432/hrsaas'
+  process.env.DIRECT_URL =
+    process.env.DIRECT_URL ?? 'postgresql://hrsaas:hrsaas@localhost:5432/hrsaas'
   process.env.JWT_SECRET = 'test-jwt-secret-minimum-32-chars-long-abc'
   process.env.COOKIE_SECRET = 'test-cookie-secret-min-32-chars-long-abc'
   process.env.PII_ENCRYPTION_KEY = 'dev-only-pii-key'
   process.env.CORS_ALLOWED_ORIGINS = 'http://localhost:3000'
 
+  // Seed de test-database programmatisch — werkt ook in CI (lege Postgres na migrate).
+  prisma = new PrismaClient({
+    datasources: {
+      db: {
+        url: process.env.DIRECT_URL ?? process.env.DATABASE_URL,
+      },
+    },
+  })
+  await seedTestDatabase(prisma)
+
   app = await buildTestApp()
-})
+}, 60_000) // BCrypt 12 rounds + DB-seed kan even duren
 
 afterAll(async () => {
-  await app.close()
+  await app?.close()
+  await prisma?.$disconnect()
 })
 
 beforeEach(() => {
+  // Reset in-memory rate-limiter state tussen tests — voorkomt lekken.
   _resetAllBuckets()
 })
-
-// Helper: maak een inject-request met cookies
-function parseCookies(setCookieHeaders: string[]): Record<string, string> {
-  const cookies: Record<string, string> = {}
-  for (const header of setCookieHeaders) {
-    const [pair] = header.split(';')
-    if (!pair) continue
-    const [name, value] = pair.split('=')
-    if (name && value !== undefined) cookies[name.trim()] = value.trim()
-  }
-  return cookies
-}
 
 describe('POST /v1/auth/login', () => {
   it('[US-2] geeft 200 + access_token + cookies bij correcte credentials', async () => {
@@ -69,7 +102,7 @@ describe('POST /v1/auth/login', () => {
     expect(body.token_type).toBe('Bearer')
     expect(body.expires_in).toBe(900)
 
-    const cookies = parseCookies(res.headers['set-cookie'] as string[])
+    const cookies = parseCookies(res.headers['set-cookie'])
     expect(cookies['hr_refresh']).toBeTruthy()
     expect(cookies['hr_csrf']).toBeTruthy()
   })
@@ -127,19 +160,19 @@ describe('POST /v1/auth/login', () => {
 })
 
 describe('POST /v1/auth/refresh', () => {
-  async function loginAndGetCookies() {
+  async function loginAndGetCookies(): Promise<Record<string, string>> {
     const loginRes = await app.inject({
       method: 'POST',
       url: '/v1/auth/login',
       payload: { email: HR_ADMIN_EMAIL, password: HR_ADMIN_PASSWORD },
     })
-    const cookies = parseCookies(loginRes.headers['set-cookie'] as string[])
-    return cookies
+    expect(loginRes.statusCode).toBe(200)
+    return parseCookies(loginRes.headers['set-cookie'])
   }
 
   it('[US-3] roteer refresh-token en geef nieuw access_token', async () => {
     const cookies = await loginAndGetCookies()
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- loginAndGetCookies() garandeert cookies aanwezig via eerdere test
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const hrRefresh = cookies['hr_refresh']!
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const hrCsrf = cookies['hr_csrf']!
@@ -157,7 +190,7 @@ describe('POST /v1/auth/refresh', () => {
     expect(body.token_type).toBe('Bearer')
 
     // Nieuwe cookies moeten gezet zijn
-    const newCookies = parseCookies(res.headers['set-cookie'] as string[])
+    const newCookies = parseCookies(res.headers['set-cookie'])
     expect(newCookies['hr_refresh']).toBeTruthy()
     expect(newCookies['hr_refresh']).not.toBe(hrRefresh) // Rotatie
   })
@@ -223,7 +256,8 @@ describe('POST /v1/auth/logout', () => {
       url: '/v1/auth/login',
       payload: { email: HR_ADMIN_EMAIL, password: HR_ADMIN_PASSWORD },
     })
-    const cookies = parseCookies(loginRes.headers['set-cookie'] as string[])
+    expect(loginRes.statusCode).toBe(200)
+    const cookies = parseCookies(loginRes.headers['set-cookie'])
 
     const logoutRes = await app.inject({
       method: 'POST',
@@ -234,9 +268,7 @@ describe('POST /v1/auth/logout', () => {
 
     expect(logoutRes.statusCode).toBe(204)
     // Na logout moeten cookies ge-cleared zijn (maxAge=0 of verwijderd)
-    const _logoutCookies = parseCookies(logoutRes.headers['set-cookie'] as string[] ?? [])
-    // hr_refresh moet maxAge=0 hebben (in de raw header staat Max-Age=0)
-    const rawHeaders = (logoutRes.headers['set-cookie'] as string[] ?? []).join('; ')
+    const rawHeaders = normalizeCookieHeader(logoutRes.headers['set-cookie']).join('; ')
     expect(rawHeaders).toMatch(/Max-Age=0/)
   })
 })
@@ -369,7 +401,7 @@ describe('POST /v1/auth/register', () => {
     expect(res.json().error ?? res.json().authCode).toBe('email_already_taken')
   })
 
-  it('[US-1] geeft 422 bij wachtwoord korter dan 12 tekens', async () => {
+  it('[US-1] geeft 400 bij wachtwoord korter dan 12 tekens', async () => {
     const loginRes = await app.inject({
       method: 'POST',
       url: '/v1/auth/login',

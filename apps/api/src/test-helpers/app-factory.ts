@@ -3,7 +3,7 @@
  * Gebruik in integration tests — niet voor unit tests.
  */
 
-import { buildApp } from '../../src/app.js'
+import { buildApp } from '../app.js'
 import type { FastifyInstance } from 'fastify'
 
 export async function buildTestApp(): Promise<FastifyInstance> {
